@@ -10,11 +10,9 @@ The project was moved from
 in application code. If the project is moved again, run `flutter clean` before a
 Windows build so CMake does not reuse its absolute-path cache.
 
-Important: this moved directory is currently **not a Git repository**. There is no
-`.git` directory and therefore no commit history, branch protection, or easy
-rollback for future edits. Before substantial Claude work, initialize Git or make
-a full external backup. Do not assume the old parent repository still tracks this
-copy.
+This directory is a standalone Git repository (initialized at the moved root;
+the first commit is the pre-overhaul baseline). It has no remote yet. Do not
+assume the old parent repository still tracks this copy.
 
 ## Product and current delivery
 
@@ -33,7 +31,10 @@ implemented. The current usable scope is:
 - Commercial POS cart, held carts, customers, discounts, tax, and split payment
 - Atomic checkout with inventory, cash, loyalty, audit, and invoice sequencing
 - Sales history, receipt viewing, printing, and PDF saving
-- Persistent theme/accessibility settings
+- Persistent theme/accessibility settings (presets, Windows accent, custom
+  colour, density, text size, radius, motion)
+- Database-backed business settings: currency, number format, tax mode/label,
+  tax registration number, receipt header/footer, discount and stock rules
 
 Do not describe these placeholder modules as implemented:
 
@@ -59,6 +60,12 @@ modules. Their presence does not mean their workflows are complete.
 - Desktop window: `window_manager`
 - Preferences: `shared_preferences`
 - Logging: `talker_flutter`
+- Theming: `flex_color_scheme` **8.x** (pinned; 9.x is built on the separate
+  `material_ui` package and its `ThemeData` is a different type)
+- Windows accent colour: `dynamic_color` **1.7.x** (pinned for the same reason)
+- Motion: `flutter_animate` (always through `.entrance()`/`AppTokens.motion`,
+  which honour the user's animation setting)
+- Charts: `fl_chart`
 
 See `pubspec.yaml` for exact constraints. Do not upgrade packages incidentally
 while implementing an unrelated feature.
@@ -100,6 +107,13 @@ Entry flow:
 5. `ApplicationGate` checks first-run setup before allowing normal navigation.
 6. After setup it requires an active unlocked session; otherwise it shows login.
 
+`ApplicationGate` lives in `MaterialApp.builder`, i.e. above the router's
+Navigator. Every screen it renders (setup, login, lock, startup error) must be
+wrapped in its own `Navigator` (`_GateNavigator`) so it has an `Overlay`.
+Without one, text fields on Windows lost edits ("deleted text comes back") and
+dropdowns/dialogs could not open. Locking keeps the workspace mounted
+(`Offstage` + `ExcludeFocus`) so an in-progress sale survives lock/unlock.
+
 `databaseProvider`, `sharedPreferencesProvider`, and `talkerProvider` must be
 overridden at bootstrap/test boundaries. Do not instantiate unrelated database
 connections inside widgets.
@@ -112,8 +126,10 @@ smoke tests use 1280×720 as the required compact desktop layout.
 ```text
 lib/app/                         bootstrap, router, root app, setup/auth gate
 lib/core/database/               Drift schema, connection, migrations, providers
-lib/core/money/                  integer-minor-unit Money value object
-lib/core/theme/                  tokens, ThemeData, persisted theme controller
+lib/core/money/                  Money, currency catalogue, MoneyFormatter/parseAmount
+lib/core/theme/                  AppTokens extension, flex ThemeData, theme controller
+lib/core/ui/                     shared UI kit (PageHeader, StatCard, EmptyState,
+                                 StatusPill, KeyHint, Toast, confirm/prompt dialogs)
 lib/features/*/domain/           pure rules and value objects
 lib/features/*/application/      Riverpod state/controllers
 lib/features/*/data/             repositories and transactional services
@@ -136,7 +152,7 @@ method must repeat its permission check even when its button/route is hidden.
 - `/history` — implemented sales search/detail/receipt actions
 - `/users` — implemented users and role-permission editor
 - `/stores` — implemented branch management
-- `/settings` — implemented appearance/theme settings
+- `/settings` — implemented appearance, business & regional, checkout & receipt
 - `/inventory`, `/purchases`, `/cashbook`, `/reports` — placeholders
 
 Navigation visibility is permission-filtered in `AppShell`, using module metadata
@@ -218,6 +234,13 @@ exact barcode/SKU lookup, held carts, and payment methods.
 
 ## Money, quantity, discount, and tax rules
 
+Never hardcode a currency symbol. Display every amount through
+`moneyFormatterProvider` (`format(Money)`, `major(double)`), and parse typed
+amounts with `MoneyFormatter.parse`, which honours the configured decimal
+separator (`1.250` kg must not become 1250). `Money` has two minor digits, so
+only two-decimal currencies are offered in `Currencies.all`; adding JPY/KWD-style
+currencies requires a Money precision change first.
+
 Application arithmetic uses `Money`, which stores signed integer minor units.
 The existing database schema persists monetary values in REAL columns for Phase 1
 migration compatibility; convert only at the database boundary. Do not perform
@@ -238,6 +261,13 @@ sale percentage/fixed discount. Totals clamp discounts so a line or sale cannot
 be negative. The current sale-level discount is subtracted from the post-line-tax
 total; it does not reallocate line tax or line totals. Treat a change to this rule
 as an accounting behavior change and update tests, receipts, and stored snapshots.
+
+Business settings are read through `businessSettingsProvider` /
+`currentBusinessSettingsProvider` (live stream of global `app_settings` rows) and
+written only through `BusinessSettingsRepository.save`, which requires
+`settings.manage`, updates changed keys in one transaction and writes a
+`settings.updated` audit row. The POS UI enforces the discount cap and override
+toggle up front; `CheckoutService` still re-validates.
 
 Settings involved in checkout:
 
@@ -332,9 +362,18 @@ Keyboard bindings:
 - F6 — sale discount
 - F7 — payment
 - F8 — exact quick-cash checkout
-- F10 — open/complete payment depending focus
+- F9 — held sales (resuming parks the current cart instead of discarding it)
+- F10 / Ctrl+Enter — open/complete payment depending focus
+- Enter on an empty search field — open payment
+- P on the sale-complete dialog — print receipt
 - Ctrl+N — confirmed new/clear sale
+- Ctrl+B — collapse/expand sidebar; Ctrl+L — lock
 - Escape — standard dialog/back behavior
+
+The POS customer label is derived from `cart.customerId`, never kept as
+separate widget state. Tracked products cannot be added beyond stock unless
+`inventory.allowNegative` is on. An unmatched scan shows a toast; if exactly
+one search result is visible, Enter adds it.
 
 The focused search field supports ordinary USB barcode scanners. There is no
 global scanner buffer when focus is elsewhere.
@@ -385,9 +424,10 @@ Receipt PDF generation uses an 80mm thermal roll layout and runs in a background
 isolate. It includes store details, invoice/date, cashier/customer, item snapshots,
 discount/tax totals, tenders, received amount, and change.
 
-Known receipt gap: first-run stores `business.name` and `receipt.footer`, but the
-current receipt uses `store.name` and a hardcoded thank-you footer. When fixing
-this, resolve scoped settings through a service and include regression tests.
+Receipts take `BusinessSettings`: business name, store, optional header, tax
+registration number, configured tax label, footer and currency format. The
+built-in PDF font is Latin-1 only, so symbols such as ₹ or ৳ print as the ISO
+code; bundle a Unicode font before printing native symbols.
 
 ## Tests and last verified state
 
@@ -405,15 +445,18 @@ used. Current coverage includes:
 - Successful checkout side effects
 - Forced checkout rollback
 - Held-cart save/restore/remove without stock mutation
+- Money formatting/parsing across number styles and decimal separators
+- Business settings load, permission denial, persistence, audit and fallbacks
+- Gate text-input regression (edit/delete/retype on login and setup) and
+  legacy theme-preference migration
 - 1280×720 Dashboard → POS → Settings → Sales History smoke navigation
 
 Last verified before this handoff:
 
 - `dart format .` — clean
 - `flutter analyze` — zero issues
-- `flutter test` — 18 tests passed
-- Windows debug build — passed at the current moved root
-- Windows release build — passed at the current moved root
+- `flutter test` — 32 tests passed
+- Windows release build — passed at the current root
 
 Always repeat format, analyze, tests, and release build after material changes.
 
@@ -445,6 +488,12 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
 - Do not use raw `double` arithmetic for new financial domain logic.
 - Do not block the UI isolate with large PDF/CSV/report/image work.
 - Preserve desktop density and verify 1280×720 overflow behavior.
+- Dialog text fields: create controllers inside a `StatefulWidget` that disposes
+  them; never create or re-sync a controller from `build()`. Key
+  `DropdownButtonFormField`s (they read `initialValue` once) when their data
+  can be reloaded.
+- Do not call a repository future inside `build()` (`FutureBuilder(future:
+  _load())`); cache the future and refresh it on real filter changes.
 - Preserve unrelated user changes; inspect the working tree before editing.
 - Run build_runner after Drift schema changes and all quality gates before handoff.
 

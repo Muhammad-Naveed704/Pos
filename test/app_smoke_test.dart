@@ -42,19 +42,21 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
-    expect(find.text('Today sales'), findsOneWidget);
+    expect(find.text('Today’s sales'), findsOneWidget);
 
     appRouter.go('/pos');
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pump();
-    expect(find.text('Current cart'), findsOneWidget);
-    expect(find.text('Payment  F7'), findsOneWidget);
+    expect(find.text('Current sale'), findsOneWidget);
+    expect(find.text('Pay'), findsOneWidget);
+    expect(find.text('Cart is empty'), findsOneWidget);
 
     appRouter.go('/settings');
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pump();
     expect(find.text('Appearance'), findsOneWidget);
-    expect(find.text('Color mode'), findsOneWidget);
+    expect(find.text('Colour mode'), findsOneWidget);
+    expect(find.text('Business & regional'), findsOneWidget);
 
     appRouter.go('/history');
     await tester.pump(const Duration(milliseconds: 250));

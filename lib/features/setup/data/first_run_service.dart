@@ -23,6 +23,8 @@ class FirstRunInput {
     required this.password,
     required this.taxMode,
     required this.receiptFooter,
+    this.numberStyle = 'international',
+    this.taxLabel = 'Tax',
   });
 
   final String businessName;
@@ -37,6 +39,8 @@ class FirstRunInput {
   final String password;
   final String taxMode;
   final String receiptFooter;
+  final String numberStyle;
+  final String taxLabel;
 }
 
 final firstRunServiceProvider = Provider<FirstRunService>(
@@ -150,6 +154,10 @@ class FirstRunService {
       final settings = <String, String>{
         'business.name': input.businessName.trim(),
         'currency.code': input.currency,
+        'currency.numberStyle': input.numberStyle,
+        'tax.label': input.taxLabel.trim().isEmpty
+            ? 'Tax'
+            : input.taxLabel.trim(),
         'timezone': input.timezone,
         'tax.mode': input.taxMode,
         'receipt.footer': input.receiptFooter.trim(),

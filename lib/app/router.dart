@@ -51,12 +51,7 @@ final appRouter = GoRouter(
           builder: (context, state) => const StoresPage(),
         ),
         for (final module in moduleDefinitions.where(
-          (module) => const {
-            '/inventory',
-            '/purchases',
-            '/cashbook',
-            '/reports',
-          }.contains(module.path),
+          (module) => module.isPlaceholder,
         ))
           GoRoute(
             path: module.path,

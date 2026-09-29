@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/ui_kit.dart';
+
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
 import '../../stores/data/store_repository.dart';
@@ -19,23 +21,19 @@ class UsersPage extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                'Users & roles',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const Spacer(),
+          PageHeader(
+            title: 'Users & roles',
+            subtitle: 'Local accounts, store access and role permissions.',
+            actions: [
               if (canManage) ...[
                 OutlinedButton.icon(
                   onPressed: () => _manageRoles(context, ref),
                   icon: const Icon(Icons.admin_panel_settings_outlined),
                   label: const Text('Role permissions'),
                 ),
-                const SizedBox(width: 10),
                 FilledButton.icon(
                   onPressed: () => _edit(context, ref),
-                  icon: const Icon(Icons.person_add_alt),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
                   label: const Text('New user'),
                 ),
               ],

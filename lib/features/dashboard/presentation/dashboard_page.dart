@@ -1,8 +1,13 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/money/money_format.dart';
+import '../../../core/ui/ui_kit.dart';
+import '../../auth/application/session_controller.dart';
+import '../../settings/data/business_settings_repository.dart';
 import '../data/dashboard_metrics.dart';
 
 class DashboardPage extends ConsumerWidget {
@@ -11,221 +16,54 @@ class DashboardPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final metrics = ref.watch(dashboardMetricsProvider);
-    final money = NumberFormat.currency(symbol: 'Rs ', decimalDigits: 0);
+    final money = ref.watch(moneyFormatterProvider);
+    final session = ref.watch(activeSessionProvider)!;
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+        ? 'Good afternoon'
+        : 'Good evening';
     return RefreshIndicator(
       onRefresh: () => ref.refresh(dashboardMetricsProvider.future),
       child: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Good day',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    DateFormat('EEEE, d MMMM y').format(DateTime.now()),
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+          PageHeader(
+            title: '$greeting, ${session.user.displayName.split(' ').first}',
+            subtitle:
+                '${DateFormat('EEEE, d MMMM y').format(DateTime.now())} · ${session.store.name}',
+            actions: [
+              IconButton.outlined(
+                tooltip: 'Refresh',
+                onPressed: () => ref.invalidate(dashboardMetricsProvider),
+                icon: const Icon(Icons.refresh_rounded),
               ),
-              const Spacer(),
               FilledButton.icon(
                 onPressed: () => context.go('/pos'),
-                icon: const Icon(Icons.add_shopping_cart, size: 18),
-                label: const Text('New sale  Ctrl+N'),
+                icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
+                label: const Text('New sale'),
               ),
             ],
-          ),
+          ).entrance(context),
           const SizedBox(height: 22),
           metrics.when(
-            loading: () => const LinearProgressIndicator(),
-            error: (error, stack) => _ErrorCard(
-              onRetry: () => ref.invalidate(dashboardMetricsProvider),
+            loading: () => const Padding(
+              padding: EdgeInsets.all(60),
+              child: Center(child: CircularProgressIndicator()),
             ),
-            data: (value) => LayoutBuilder(
-              builder: (context, constraints) {
-                final width = (constraints.maxWidth - 48) / 4;
-                return Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
-                  children: [
-                    _MetricCard(
-                      width: width,
-                      label: 'Today sales',
-                      value: money.format(value.sales),
-                      icon: Icons.trending_up,
-                      tint: const Color(0xFF1473E6),
-                    ),
-                    _MetricCard(
-                      width: width,
-                      label: 'Invoices',
-                      value: '${value.invoices}',
-                      icon: Icons.receipt_long_outlined,
-                      tint: const Color(0xFF7C3AED),
-                    ),
-                    _MetricCard(
-                      width: width,
-                      label: 'Cash collected',
-                      value: money.format(value.cashCollected),
-                      icon: Icons.payments_outlined,
-                      tint: const Color(0xFF098A6E),
-                    ),
-                    _MetricCard(
-                      width: width,
-                      label: 'Discounts',
-                      value: money.format(value.discounts),
-                      icon: Icons.percent,
-                      tint: const Color(0xFFD97706),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 310,
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Sales trend',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Hourly performance appears after your first completed sale.',
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                          ),
-                          const Spacer(),
-                          const _EmptyChart(),
-                          const Spacer(),
-                        ],
-                      ),
-                    ),
-                  ),
+            error: (error, stack) => Card(
+              child: EmptyState(
+                icon: Icons.error_outline_rounded,
+                title: 'Dashboard data could not be loaded',
+                message: friendlyError(error),
+                action: FilledButton(
+                  onPressed: () => ref.invalidate(dashboardMetricsProvider),
+                  child: const Text('Retry'),
                 ),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Inventory health',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 22),
-                          metrics.maybeWhen(
-                            data: (value) => Column(
-                              children: [
-                                _InventoryRow(
-                                  label: 'Low stock',
-                                  value: value.lowStock,
-                                  color: const Color(0xFFD97706),
-                                ),
-                                const SizedBox(height: 14),
-                                _InventoryRow(
-                                  label: 'Out of stock',
-                                  value: value.outOfStock,
-                                  color: const Color(0xFFE13C65),
-                                ),
-                                const SizedBox(height: 14),
-                                _InventoryRow(
-                                  label: 'Customers',
-                                  value: value.customers,
-                                  color: const Color(0xFF1473E6),
-                                ),
-                              ],
-                            ),
-                            orElse: () => const LinearProgressIndicator(),
-                          ),
-                          const Spacer(),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              onPressed: () => context.go('/inventory'),
-                              child: const Text('Open inventory'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Quick actions',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children:
-                        [
-                              _QuickAction(
-                                'Add product',
-                                Icons.add_box_outlined,
-                                '/products',
-                              ),
-                              _QuickAction(
-                                'Add customer',
-                                Icons.person_add_alt,
-                                '/customers',
-                              ),
-                              _QuickAction(
-                                'Import CSV',
-                                Icons.upload_file_outlined,
-                                '/products',
-                              ),
-                              _QuickAction(
-                                'Open cashbook',
-                                Icons.account_balance_wallet_outlined,
-                                '/cashbook',
-                              ),
-                            ]
-                            .map(
-                              (item) => OutlinedButton.icon(
-                                onPressed: () => context.go(item.path),
-                                icon: Icon(item.icon, size: 18),
-                                label: Text(item.label),
-                              ),
-                            )
-                            .toList(),
-                  ),
-                ],
               ),
             ),
+            data: (value) => _DashboardBody(metrics: value, money: money),
           ),
         ],
       ),
@@ -233,141 +71,453 @@ class DashboardPage extends ConsumerWidget {
   }
 }
 
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({
-    required this.width,
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.tint,
-  });
-  final double width;
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color tint;
+class _DashboardBody extends StatelessWidget {
+  const _DashboardBody({required this.metrics, required this.money});
+  final DashboardMetrics metrics;
+  final MoneyFormatter money;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: width,
-    child: Card(
-      child: Padding(
-        padding: const EdgeInsets.all(17),
-        child: Row(
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final change = metrics.yesterdaySales == 0
+        ? null
+        : (metrics.sales - metrics.yesterdaySales) /
+              metrics.yesterdaySales *
+              100;
+    final kpis = [
+      StatCard(
+        label: 'Today’s sales',
+        value: money.major(metrics.sales),
+        icon: Icons.trending_up_rounded,
+        footnote: change == null
+            ? 'No sales yesterday to compare'
+            : '${change >= 0 ? '▲' : '▼'} ${change.abs().toStringAsFixed(1)}% vs yesterday',
+      ),
+      StatCard(
+        label: 'Invoices',
+        value: '${metrics.invoices}',
+        icon: Icons.receipt_long_rounded,
+        color: context.colors.tertiary,
+        footnote: 'Avg ${money.major(metrics.averageSale)} per sale',
+      ),
+      StatCard(
+        label: 'Net cash collected',
+        value: money.major(metrics.cashCollected),
+        icon: Icons.payments_rounded,
+        color: tokens.success,
+        footnote: 'Cash tendered minus change',
+      ),
+      StatCard(
+        label: 'Discounts given',
+        value: money.major(metrics.discounts),
+        icon: Icons.percent_rounded,
+        color: tokens.warning,
+        footnote: '${metrics.customers} active customers',
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
           children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: tint.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
+            for (var i = 0; i < kpis.length; i++) ...[
+              if (i > 0) const SizedBox(width: 14),
+              Expanded(child: kpis[i].entrance(context, delay: 40 * i)),
+            ],
+          ],
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 330,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: SectionCard(
+                  title: 'Sales by hour',
+                  subtitle: 'Today, completed sales',
+                  icon: Icons.bar_chart_rounded,
+                  child: metrics.sales == 0
+                      ? const EmptyState(
+                          compact: true,
+                          icon: Icons.insights_rounded,
+                          title: 'No sales yet today',
+                          message:
+                              'The hourly trend appears after the first sale.',
+                        )
+                      : _HourlyChart(values: metrics.hourly, money: money),
+                ).entrance(context, delay: 120),
               ),
-              child: SizedBox(
-                width: 42,
-                height: 42,
-                child: Icon(icon, color: tint, size: 21),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 2,
+                child: SectionCard(
+                  title: 'Last 7 days',
+                  subtitle: 'Daily revenue',
+                  icon: Icons.calendar_view_week_rounded,
+                  child: _WeekChart(days: metrics.week, money: money),
+                ).entrance(context, delay: 160),
               ),
-            ),
-            const SizedBox(width: 13),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Expanded(
+              flex: 3,
+              child: SectionCard(
+                title: 'Top products',
+                subtitle: 'By revenue, last 7 days',
+                icon: Icons.emoji_events_outlined,
+                child: metrics.topProducts.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: EmptyState(
+                          compact: true,
+                          icon: Icons.inventory_2_outlined,
+                          title: 'No product sales yet',
+                        ),
+                      )
+                    : _RankedBars(
+                        rows: [
+                          for (final item in metrics.topProducts)
+                            (
+                              item.name,
+                              item.revenue,
+                              '${_qty(item.quantity)} sold',
+                            ),
+                        ],
+                        money: money,
+                      ),
+              ).entrance(context, delay: 200),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 2,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 3),
-                  Text(
-                    value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w800),
+                  SectionCard(
+                    title: 'Payment mix',
+                    subtitle: 'Today, by tender',
+                    icon: Icons.account_balance_wallet_outlined,
+                    child: metrics.paymentMix.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('No payments yet today.'),
+                          )
+                        : _RankedBars(
+                            rows: [
+                              for (final entry
+                                  in (metrics.paymentMix.entries.toList()..sort(
+                                    (a, b) => b.value.compareTo(a.value),
+                                  )))
+                                (entry.key.toUpperCase(), entry.value, null),
+                            ],
+                            money: money,
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  SectionCard(
+                    title: 'Inventory health',
+                    icon: Icons.warehouse_outlined,
+                    trailing: TextButton(
+                      onPressed: () => context.go('/products'),
+                      child: const Text('Products'),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _HealthTile(
+                            label: 'Low stock',
+                            value: metrics.lowStock,
+                            icon: Icons.warning_amber_rounded,
+                            tone: PillTone.warning,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _HealthTile(
+                            label: 'Out of stock',
+                            value: metrics.outOfStock,
+                            icon: Icons.remove_shopping_cart_outlined,
+                            tone: PillTone.danger,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
-              ),
+              ).entrance(context, delay: 240),
             ),
           ],
         ),
-      ),
-    ),
-  );
+      ],
+    );
+  }
 }
 
-class _EmptyChart extends StatelessWidget {
-  const _EmptyChart();
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 110,
-    child: CustomPaint(
-      painter: _GridPainter(Theme.of(context).colorScheme.outlineVariant),
-      child: Center(
-        child: Icon(
-          Icons.show_chart,
-          size: 34,
-          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+String _qty(double value) => value == value.roundToDouble()
+    ? value.toStringAsFixed(0)
+    : value.toStringAsFixed(2);
+
+FlGridData _grid(BuildContext context) => FlGridData(
+  drawVerticalLine: false,
+  getDrawingHorizontalLine: (_) => FlLine(
+    color: context.colors.outlineVariant.withValues(alpha: 0.45),
+    strokeWidth: 1,
+  ),
+);
+
+BarTouchData _barTouch(BuildContext context, String Function(int x) label) =>
+    BarTouchData(
+      touchTooltipData: BarTouchTooltipData(
+        getTooltipColor: (_) => context.colors.inverseSurface,
+        tooltipBorderRadius: BorderRadius.circular(8),
+        getTooltipItem: (group, _, rod, _) => BarTooltipItem(
+          label(group.x),
+          TextStyle(
+            color: context.colors.onInverseSurface,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
 
-class _GridPainter extends CustomPainter {
-  _GridPainter(this.color);
-  final Color color;
+class _HourlyChart extends StatelessWidget {
+  const _HourlyChart({required this.values, required this.money});
+  final List<double> values;
+  final MoneyFormatter money;
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color.withValues(alpha: 0.55);
-    for (var row = 0; row <= 4; row++) {
-      final y = size.height * row / 4;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
+  Widget build(BuildContext context) {
+    final first = values.indexWhere((value) => value > 0);
+    final start = (first == -1 ? 8 : first).clamp(0, 8);
+    final end = 23;
+    final muted = context.text.labelSmall?.copyWith(
+      color: context.colors.onSurfaceVariant,
+    );
+    return BarChart(
+      BarChartData(
+        gridData: _grid(context),
+        borderData: FlBorderData(show: false),
+        barTouchData: _barTouch(
+          context,
+          (x) =>
+              '${x.toString().padLeft(2, '0')}:00\n${money.major(values[x])}',
+        ),
+        titlesData: FlTitlesData(
+          topTitles: const AxisTitles(),
+          rightTitles: const AxisTitles(),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 52,
+              getTitlesWidget: (value, meta) => value == meta.max
+                  ? const SizedBox.shrink()
+                  : Text(money.compact(value), style: muted),
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) => value.toInt() % 3 == 0
+                  ? Text('${value.toInt()}h', style: muted)
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        barGroups: [
+          for (var hour = start; hour <= end; hour++)
+            BarChartGroupData(
+              x: hour,
+              barRods: [
+                BarChartRodData(
+                  toY: values[hour],
+                  width: 12,
+                  color: context.colors.primary,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      duration: context.tokens.motion(300),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant _GridPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
 
-class _InventoryRow extends StatelessWidget {
-  const _InventoryRow({
+class _WeekChart extends StatelessWidget {
+  const _WeekChart({required this.days, required this.money});
+  final List<(DateTime, double)> days;
+  final MoneyFormatter money;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = context.text.labelSmall?.copyWith(
+      color: context.colors.onSurfaceVariant,
+    );
+    return BarChart(
+      BarChartData(
+        gridData: _grid(context),
+        borderData: FlBorderData(show: false),
+        barTouchData: _barTouch(
+          context,
+          (x) =>
+              '${DateFormat('EEE d MMM').format(days[x].$1)}\n${money.major(days[x].$2)}',
+        ),
+        titlesData: FlTitlesData(
+          topTitles: const AxisTitles(),
+          rightTitles: const AxisTitles(),
+          leftTitles: const AxisTitles(),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) => Text(
+                DateFormat('E').format(days[value.toInt()].$1),
+                style: value.toInt() == days.length - 1
+                    ? muted?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: context.colors.onSurface,
+                      )
+                    : muted,
+              ),
+            ),
+          ),
+        ),
+        barGroups: [
+          for (var i = 0; i < days.length; i++)
+            BarChartGroupData(
+              x: i,
+              barRods: [
+                BarChartRodData(
+                  toY: days[i].$2,
+                  width: 22,
+                  // Today is emphasised; earlier days are the same hue, lighter.
+                  color: i == days.length - 1
+                      ? context.colors.primary
+                      : context.colors.primary.withValues(alpha: 0.45),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+      duration: context.tokens.motion(300),
+    );
+  }
+}
+
+/// Labelled horizontal magnitude bars in a single hue.
+class _RankedBars extends StatelessWidget {
+  const _RankedBars({required this.rows, required this.money});
+  final List<(String, double, String?)> rows;
+  final MoneyFormatter money;
+
+  @override
+  Widget build(BuildContext context) {
+    final max = rows.fold<double>(0, (m, row) => row.$2 > m ? row.$2 : m);
+    return Column(
+      children: [
+        for (final row in rows)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        row.$1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    if (row.$3 != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: Text(
+                          row.$3!,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    Text(
+                      money.major(row.$2),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: max == 0 ? 0 : row.$2 / max,
+                    minHeight: 6,
+                    color: context.colors.primary,
+                    backgroundColor: context.colors.surfaceContainerHighest,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _HealthTile extends StatelessWidget {
+  const _HealthTile({
     required this.label,
     required this.value,
-    required this.color,
+    required this.icon,
+    required this.tone,
   });
   final String label;
   final int value;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Container(
-        width: 9,
-        height: 9,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      ),
-      const SizedBox(width: 10),
-      Expanded(child: Text(label)),
-      Text('$value', style: const TextStyle(fontWeight: FontWeight.w800)),
-    ],
-  );
-}
-
-class _QuickAction {
-  const _QuickAction(this.label, this.icon, this.path);
-  final String label;
   final IconData icon;
-  final String path;
-}
+  final PillTone tone;
 
-class _ErrorCard extends StatelessWidget {
-  const _ErrorCard({required this.onRetry});
-  final VoidCallback onRetry;
   @override
-  Widget build(BuildContext context) => Card(
-    child: ListTile(
-      leading: Icon(
-        Icons.error_outline,
-        color: Theme.of(context).colorScheme.error,
+  Widget build(BuildContext context) {
+    final color = tone == PillTone.danger
+        ? context.colors.error
+        : context.tokens.warning;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: context.tokens.borderRadius,
+        border: Border.all(color: context.colors.outlineVariant),
       ),
-      title: const Text('Dashboard data could not be loaded'),
-      trailing: TextButton(onPressed: onRetry, child: const Text('Retry')),
-    ),
-  );
+      child: Row(
+        children: [
+          Icon(icon, color: value == 0 ? context.colors.outline : color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$value',
+                  style: context.text.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(label, style: context.text.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

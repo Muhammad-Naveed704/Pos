@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/ui_kit.dart';
+import '../../settings/data/business_settings_repository.dart';
 import '../application/session_controller.dart';
 import '../domain/app_session.dart';
 
@@ -13,18 +15,14 @@ class LoginPage extends ConsumerStatefulWidget {
 }
 
 class _LoginPageState extends ConsumerState<LoginPage> {
-  final _username = TextEditingController();
+  late final _username = TextEditingController(
+    text: widget.lockedSession?.user.username ?? '',
+  );
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _busy = false;
   bool _obscure = true;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _username.text = widget.lockedSession?.user.username ?? '';
-  }
 
   @override
   void dispose() {
@@ -34,7 +32,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate() || _busy) return;
+    if (_busy || !_formKey.currentState!.validate()) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -47,148 +45,263 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         await controller.unlock(_password.text);
       }
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) {
+        setState(() => _error = friendlyError(error));
+        _password.clear();
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Row(
-      children: [
-        Expanded(
-          child: ColoredBox(
-            color: Theme.of(context).colorScheme.primary,
-            child: Padding(
+  Widget build(BuildContext context) {
+    final locked = widget.lockedSession;
+    final scheme = context.colors;
+    final business = ref.watch(currentBusinessSettingsProvider).businessName;
+    return Scaffold(
+      body: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    scheme.primary,
+                    // Darker shade of the same hue keeps white text readable
+                    // with every preset (tertiary can be very light).
+                    Color.alphaBlend(
+                      Colors.black.withValues(alpha: 0.35),
+                      scheme.primary,
+                    ),
+                  ],
+                ),
+              ),
               padding: const EdgeInsets.all(56),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  const Icon(Icons.bolt_rounded, size: 54, color: Colors.white),
-                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      const BrandMark(size: 44, onDark: true),
+                      const SizedBox(width: 12),
+                      Text(
+                        'StoreFlow POS',
+                        style: context.text.titleLarge?.copyWith(
+                          color: scheme.onPrimary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
                   Text(
-                    'Fast at the counter.\nReliable everywhere.',
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      color: Colors.white,
+                    business.isEmpty
+                        ? 'Fast at the counter.\nReliable everywhere.'
+                        : business,
+                    style: context.text.displaySmall?.copyWith(
+                      color: scheme.onPrimary,
                       fontWeight: FontWeight.w800,
+                      height: 1.1,
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Your sales and inventory stay on this PC and remain available offline.',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
+                  ).entrance(context),
+                  const SizedBox(height: 18),
+                  for (final (icon, text) in const [
+                    (Icons.wifi_off_rounded, 'Works fully offline'),
+                    (Icons.shield_outlined, 'Your data stays on this PC'),
+                    (
+                      Icons.keyboard_rounded,
+                      'Keyboard & barcode-scanner first',
+                    ),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            icon,
+                            size: 20,
+                            color: scheme.onPrimary.withValues(alpha: 0.85),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            text,
+                            style: TextStyle(
+                              color: scheme.onPrimary.withValues(alpha: 0.85),
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
-        ),
-        SizedBox(
-          width: 500,
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(54),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      widget.lockedSession == null
-                          ? 'Welcome back'
-                          : 'StoreFlow is locked',
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 7),
-                    Text(
-                      widget.lockedSession == null
-                          ? 'Sign in with your local StoreFlow account.'
-                          : 'Enter your password to continue.',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-                    TextFormField(
-                      controller: _username,
-                      enabled: widget.lockedSession == null && !_busy,
-                      textInputAction: TextInputAction.next,
-                      decoration: const InputDecoration(
-                        labelText: 'Username',
-                        prefixIcon: Icon(Icons.person_outline),
-                      ),
-                      validator: (value) =>
-                          value == null || value.trim().isEmpty
-                          ? 'Enter your username.'
-                          : null,
-                    ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: _password,
-                      autofocus: widget.lockedSession != null,
-                      obscureText: _obscure,
-                      enabled: !_busy,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                          icon: Icon(
-                            _obscure
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
+          SizedBox(
+            width: 500,
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(54),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (locked != null) ...[
+                        Center(
+                          child: CircleAvatar(
+                            radius: 34,
+                            backgroundColor: scheme.primaryContainer,
+                            child: Icon(
+                              Icons.lock_rounded,
+                              size: 30,
+                              color: scheme.onPrimaryContainer,
+                            ),
                           ),
                         ),
-                      ),
-                      validator: (value) => value == null || value.isEmpty
-                          ? 'Enter your password.'
-                          : null,
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 18),
+                      ],
                       Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                        locked == null
+                            ? 'Welcome back'
+                            : 'Locked · ${locked.user.displayName}',
+                        textAlign: locked == null
+                            ? TextAlign.start
+                            : TextAlign.center,
+                        style: context.text.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
                         ),
                       ),
-                    ],
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _submit,
-                      icon: _busy
-                          ? const SizedBox.square(
-                              dimension: 17,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.login),
-                      label: Text(
-                        widget.lockedSession == null ? 'Sign in' : 'Unlock',
+                      const SizedBox(height: 6),
+                      Text(
+                        locked == null
+                            ? 'Sign in with your StoreFlow account.'
+                            : 'Enter your password to continue. Your sale is kept.',
+                        textAlign: locked == null
+                            ? TextAlign.start
+                            : TextAlign.center,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
                       ),
-                    ),
-                    if (widget.lockedSession != null) ...[
-                      const SizedBox(height: 8),
-                      TextButton(
-                        onPressed: _busy
-                            ? null
-                            : ref
-                                  .read(sessionControllerProvider.notifier)
-                                  .logout,
-                        child: const Text('Sign in as another user'),
+                      const SizedBox(height: 28),
+                      if (locked == null) ...[
+                        TextFormField(
+                          controller: _username,
+                          autofocus: true,
+                          enabled: !_busy,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(
+                            labelText: 'Username',
+                            prefixIcon: Icon(Icons.person_outline_rounded),
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Enter your username.'
+                              : null,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                      TextFormField(
+                        controller: _password,
+                        autofocus: locked != null,
+                        obscureText: _obscure,
+                        enabled: !_busy,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _submit(),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          suffixIcon: IconButton(
+                            tooltip: _obscure
+                                ? 'Show password'
+                                : 'Hide password',
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
+                            icon: Icon(
+                              _obscure
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                        validator: (value) => value == null || value.isEmpty
+                            ? 'Enter your password.'
+                            : null,
                       ),
+                      AnimatedSize(
+                        duration: context.tokens.motion(160),
+                        child: _error == null
+                            ? const SizedBox(width: double.infinity)
+                            : Padding(
+                                padding: const EdgeInsets.only(top: 14),
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: scheme.errorContainer,
+                                    borderRadius: context.tokens.borderRadius,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.error_outline_rounded,
+                                        color: scheme.onErrorContainer,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          _error!,
+                                          style: TextStyle(
+                                            color: scheme.onErrorContainer,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        height: 50,
+                        child: FilledButton.icon(
+                          onPressed: _busy ? null : _submit,
+                          icon: _busy
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  locked == null
+                                      ? Icons.login_rounded
+                                      : Icons.lock_open_rounded,
+                                ),
+                          label: Text(locked == null ? 'Sign in' : 'Unlock'),
+                        ),
+                      ),
+                      if (locked != null) ...[
+                        const SizedBox(height: 10),
+                        TextButton(
+                          onPressed: _busy
+                              ? null
+                              : ref
+                                    .read(sessionControllerProvider.notifier)
+                                    .logout,
+                          child: const Text('Sign in as another user'),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }

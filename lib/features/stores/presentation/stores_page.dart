@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/ui_kit.dart';
+
 import '../../../core/database/app_database.dart';
 import '../../auth/application/session_controller.dart';
 import '../data/store_repository.dart';
@@ -17,28 +19,13 @@ class StoresPage extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Stores',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Branches are deactivated instead of deleted.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
+          PageHeader(
+            title: 'Stores',
+            subtitle: 'Branches are deactivated instead of deleted.',
+            actions: [
               FilledButton.icon(
                 onPressed: () => _edit(context, ref),
-                icon: const Icon(Icons.add),
+                icon: const Icon(Icons.add_business_rounded),
                 label: const Text('New store'),
               ),
             ],

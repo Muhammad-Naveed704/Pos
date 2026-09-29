@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/ui_kit.dart';
+
 import '../../../core/database/app_database.dart';
 import '../../auth/application/session_controller.dart';
 import '../data/category_repository.dart';
@@ -21,16 +23,13 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                'Categories',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const Spacer(),
+          PageHeader(
+            title: 'Categories',
+            subtitle: 'Group products for faster browsing at the counter.',
+            actions: [
               FilledButton.icon(
                 onPressed: () => _edit(context),
-                icon: const Icon(Icons.add),
+                icon: const Icon(Icons.add_rounded),
                 label: const Text('New category'),
               ),
             ],

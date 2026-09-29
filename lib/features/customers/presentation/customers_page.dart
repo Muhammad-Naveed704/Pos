@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/ui/ui_kit.dart';
+import '../../settings/data/business_settings_repository.dart';
+import '../../auth/domain/permissions.dart';
+
 import '../../../core/database/app_database.dart';
 import '../../auth/application/session_controller.dart';
 import '../data/customer_repository.dart';
@@ -21,29 +25,18 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Customers',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  Text(
-                    'Profiles, loyalty and purchase summaries.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: () => _edit(context),
-                icon: const Icon(Icons.person_add_alt),
-                label: const Text('New customer'),
-              ),
+          PageHeader(
+            title: 'Customers',
+            subtitle: 'Profiles, loyalty and purchase summaries.',
+            actions: [
+              if (ref
+                  .watch(activeSessionProvider)!
+                  .can(Permissions.customersCreate))
+                FilledButton.icon(
+                  onPressed: () => _edit(context),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('New customer'),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -144,7 +137,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
             children: [
               ListTile(
                 title: const Text('Total spend'),
-                trailing: Text('Rs ${summary.totalSpend.toStringAsFixed(2)}'),
+                trailing: Text(
+                  ref.watch(moneyFormatterProvider).major(summary.totalSpend),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
               ListTile(
                 title: const Text('Last purchase'),
@@ -286,8 +282,9 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
           address: address.text,
           notes: notes.text,
           loyaltyPoints: customer?.loyaltyPoints ?? 0,
-          creditLimit: double.tryParse(credit.text) ?? 0,
-          openingBalance: double.tryParse(opening.text) ?? 0,
+          creditLimit: ref.read(moneyFormatterProvider).parse(credit.text) ?? 0,
+          openingBalance:
+              ref.read(moneyFormatterProvider).parse(opening.text) ?? 0,
           isActive: active,
         );
   }

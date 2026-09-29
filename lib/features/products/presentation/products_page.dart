@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/database_provider.dart';
+import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
+import '../../auth/domain/permissions.dart';
+import '../../settings/data/business_settings_repository.dart';
 import '../data/product_repository.dart';
 
 class ProductsPage extends ConsumerStatefulWidget {
@@ -17,6 +20,14 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   String _search = '';
   int _page = 0;
   Timer? _debounce;
+  static const _pageSize = 50;
+  late Future<List<CatalogProduct>> _rows = _load();
+
+  /// Re-queries only when search, page or data actually change.
+  void _reload([VoidCallback? change]) => setState(() {
+    change?.call();
+    _rows = _load();
+  });
 
   @override
   void dispose() {
@@ -28,7 +39,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final session = ref.read(activeSessionProvider)!;
     return ref
         .read(productRepositoryProvider)
-        .page(storeId: session.store.id, search: _search, page: _page);
+        .page(
+          storeId: session.store.id,
+          search: _search,
+          page: _page,
+          pageSize: _pageSize,
+        );
   }
 
   @override
@@ -37,29 +53,19 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Products',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                Text(
-                  'Store-aware catalog and inventory.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            FilledButton.icon(
-              onPressed: () => _edit(context),
-              icon: const Icon(Icons.add),
-              label: const Text('New product'),
-            ),
+        PageHeader(
+          title: 'Products',
+          subtitle:
+              'Store-aware catalog, pricing and stock for ${ref.watch(activeSessionProvider)!.store.name}.',
+          actions: [
+            if (ref
+                .watch(activeSessionProvider)!
+                .can(Permissions.productsCreate))
+              FilledButton.icon(
+                onPressed: () => _edit(context),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('New product'),
+              ),
           ],
         ),
         const SizedBox(height: 16),
@@ -68,7 +74,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             _debounce?.cancel();
             _debounce = Timer(const Duration(milliseconds: 220), () {
               if (mounted) {
-                setState(() {
+                _reload(() {
                   _search = value;
                   _page = 0;
                 });
@@ -76,7 +82,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             });
           },
           decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search),
+            prefixIcon: Icon(Icons.search_rounded),
             hintText: 'Search SKU, barcode or product name',
           ),
         ),
@@ -84,14 +90,30 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         Expanded(
           child: Card(
             child: FutureBuilder<List<CatalogProduct>>(
-              future: _load(),
+              future: _rows,
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return EmptyState(
+                    icon: Icons.error_outline_rounded,
+                    title: 'Products could not be loaded',
+                    message: friendlyError(snapshot.error!),
+                  );
+                }
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final rows = snapshot.data!;
+                final money = ref.watch(moneyFormatterProvider);
                 if (rows.isEmpty) {
-                  return const Center(child: Text('No products found.'));
+                  return EmptyState(
+                    icon: Icons.inventory_2_outlined,
+                    title: _search.isEmpty && _page == 0
+                        ? 'No products yet'
+                        : 'No products found',
+                    message: _search.isEmpty
+                        ? 'Create your first product to start selling.'
+                        : 'Try a different SKU, barcode or name.',
+                  );
                 }
                 return SingleChildScrollView(
                   child: SizedBox(
@@ -138,25 +160,33 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                                 ),
                                 DataCell(
                                   Text(
-                                    'Rs ${item.effectivePrice.toStringAsFixed(2)}',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    item.product.trackInventory
-                                        ? item.store.stockQty.toStringAsFixed(2)
-                                        : '—',
-                                  ),
-                                ),
-                                DataCell(
-                                  Chip(
-                                    label: Text(
-                                      item.product.isActive &&
-                                              item.store.isAvailable
-                                          ? 'Active'
-                                          : 'Inactive',
+                                    money.major(item.effectivePrice),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
+                                ),
+                                DataCell(
+                                  !item.product.trackInventory
+                                      ? const Text('—')
+                                      : StatusPill(
+                                          money.number(item.store.stockQty),
+                                          tone: item.store.stockQty <= 0
+                                              ? PillTone.danger
+                                              : item.store.stockQty <=
+                                                    item.store.reorderLevel
+                                              ? PillTone.warning
+                                              : PillTone.success,
+                                        ),
+                                ),
+                                DataCell(
+                                  item.product.isActive &&
+                                          item.store.isAvailable
+                                      ? const StatusPill(
+                                          'Active',
+                                          tone: PillTone.success,
+                                        )
+                                      : const StatusPill('Inactive'),
                                 ),
                                 DataCell(
                                   PopupMenuButton<String>(
@@ -194,16 +224,21 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             OutlinedButton(
-              onPressed: _page == 0 ? null : () => setState(() => _page -= 1),
+              onPressed: _page == 0 ? null : () => _reload(() => _page -= 1),
               child: const Text('Previous'),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14),
               child: Text('Page ${_page + 1}'),
             ),
-            OutlinedButton(
-              onPressed: () => setState(() => _page += 1),
-              child: const Text('Next'),
+            FutureBuilder<List<CatalogProduct>>(
+              future: _rows,
+              builder: (context, snapshot) => OutlinedButton(
+                onPressed: (snapshot.data?.length ?? 0) < _pageSize
+                    ? null
+                    : () => _reload(() => _page += 1),
+                child: const Text('Next'),
+              ),
             ),
           ],
         ),
@@ -237,7 +272,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         await repository.duplicate(session: session, source: item, newSku: sku);
       }
     }
-    if (mounted) setState(() {});
+    if (mounted) _reload();
   }
 
   Future<void> _edit(BuildContext context, {CatalogProduct? item}) async {
@@ -246,33 +281,40 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       database.categories,
     )..where((row) => row.isActive.equals(true))).get();
     if (!context.mounted) return;
+    final money = ref.read(moneyFormatterProvider);
+    // Pre-fill numbers with the store's decimal separator so they parse back
+    // exactly (e.g. 1.125 kg is not mistaken for 1,125).
+    String n(num? value, [String empty = '0']) {
+      if (value == null) return empty;
+      final text = value == value.roundToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toString();
+      return money.decimalSeparator == ',' ? text.replaceAll('.', ',') : text;
+    }
+
     final sku = TextEditingController(text: item?.product.sku ?? '');
     final barcode = TextEditingController(text: item?.product.barcode ?? '');
     final name = TextEditingController(text: item?.product.name ?? '');
     final shortName = TextEditingController(
       text: item?.product.shortName ?? '',
     );
-    final cost = TextEditingController(text: '${item?.product.costPrice ?? 0}');
-    final price = TextEditingController(
-      text: '${item?.product.salePrice ?? 0}',
-    );
+    final cost = TextEditingController(text: n(item?.product.costPrice));
+    final price = TextEditingController(text: n(item?.product.salePrice));
     final wholesale = TextEditingController(
-      text: '${item?.product.wholesalePrice ?? ''}',
+      text: n(item?.product.wholesalePrice, ''),
     );
-    final tax = TextEditingController(text: '${item?.product.taxRate ?? 0}');
+    final tax = TextEditingController(text: n(item?.product.taxRate));
     final discount = TextEditingController(
-      text: '${item?.product.defaultDiscount ?? 0}',
+      text: n(item?.product.defaultDiscount),
     );
     final unit = TextEditingController(text: item?.product.unit ?? 'each');
-    final stock = TextEditingController(text: '${item?.store.stockQty ?? 0}');
-    final reorder = TextEditingController(
-      text: '${item?.store.reorderLevel ?? 0}',
-    );
+    final stock = TextEditingController(text: n(item?.store.stockQty));
+    final reorder = TextEditingController(text: n(item?.store.reorderLevel));
     final customPrice = TextEditingController(
-      text: '${item?.store.customSalePrice ?? ''}',
+      text: n(item?.store.customSalePrice, ''),
     );
     final customDiscount = TextEditingController(
-      text: '${item?.store.customDiscount ?? ''}',
+      text: n(item?.store.customDiscount, ''),
     );
     final imagePath = TextEditingController(
       text: item?.product.imagePath ?? '',
@@ -535,23 +577,23 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             name: name.text,
             shortName: shortName.text,
             categoryId: categoryId,
-            costPrice: double.tryParse(cost.text) ?? 0,
-            salePrice: double.tryParse(price.text) ?? 0,
-            wholesalePrice: double.tryParse(wholesale.text),
-            taxRate: double.tryParse(tax.text) ?? 0,
-            defaultDiscount: double.tryParse(discount.text) ?? 0,
+            costPrice: money.parse(cost.text) ?? 0,
+            salePrice: money.parse(price.text) ?? 0,
+            wholesalePrice: money.parse(wholesale.text),
+            taxRate: money.parse(tax.text) ?? 0,
+            defaultDiscount: money.parse(discount.text) ?? 0,
             unit: unit.text,
             imagePath: imagePath.text,
             isActive: active,
             trackInventory: tracked,
-            stockQty: double.tryParse(stock.text) ?? 0,
-            reorderLevel: double.tryParse(reorder.text) ?? 0,
-            customSalePrice: double.tryParse(customPrice.text),
-            customDiscount: double.tryParse(customDiscount.text),
+            stockQty: money.parse(stock.text) ?? 0,
+            reorderLevel: money.parse(reorder.text) ?? 0,
+            customSalePrice: money.parse(customPrice.text),
+            customDiscount: money.parse(customDiscount.text),
             isAvailable: available,
           ),
         );
-    if (mounted) setState(() {});
+    if (mounted) _reload();
   }
 
   Future<String?> _textPrompt(
