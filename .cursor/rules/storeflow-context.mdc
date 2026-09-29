@@ -1,0 +1,21 @@
+---
+description: StoreFlow POS architecture and data-safety invariants
+alwaysApply: true
+---
+
+# StoreFlow POS project rule
+
+- Read `CLAUDE.md` before planning or changing this repository; it is the detailed
+  architecture, status, scope, command, and handoff source of truth.
+- Preserve the offline-first Windows Flutter/Riverpod/GoRouter/Drift architecture.
+- Never reset the database or edit `app_database.g.dart` manually. Use an additive
+  schema-version migration plus a data-preservation test.
+- Enforce permissions in repositories/services as well as UI, and scope business
+  queries to the active store.
+- Use `Money` integer minor units for financial logic; convert legacy REAL values
+  only at persistence boundaries.
+- Every stock mutation requires a `stock_movements` row in the same transaction.
+- Checkout and future purchase/refund/void workflows must be atomic and audited.
+- Do not seed fake production data or claim placeholder modules are implemented.
+- Keep desktop UI compact and verify it at 1280×720.
+- After material changes run format, analyze, tests, and Windows release build.
