@@ -1,11 +1,11 @@
-import 'dart:convert';
-
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/database/database_provider.dart';
 import '../domain/app_session.dart';
+import '../../users/data/role_repository.dart';
+import '../domain/permissions.dart';
 import 'password_hasher.dart';
 
 class AuthenticationException implements Exception {
@@ -46,6 +46,7 @@ class AuthRepository {
     if (!valid) {
       throw const AuthenticationException('Invalid username or password.');
     }
+    await PermissionUpgrade.run(_database);
     final role = await (_database.select(
       _database.roles,
     )..where((row) => row.id.equals(user.roleId))).getSingle();
@@ -58,12 +59,15 @@ class AuthRepository {
     await (_database.update(_database.users)
           ..where((row) => row.id.equals(user.id)))
         .write(UsersCompanion(lastLoginAt: Value(DateTime.now())));
-    final decoded = jsonDecode(role.permissionsJson) as List<dynamic>;
+    // The Owner always holds every permission, including ones added later.
+    final permissions = role.isSystem && role.name == ownerRoleName
+        ? Permissions.all
+        : decodePermissions(role.permissionsJson);
     return AppSession(
       user: user.copyWith(lastLoginAt: Value(DateTime.now())),
       role: role,
       store: stores.first,
-      permissions: decoded.cast<String>().toSet(),
+      permissions: permissions,
     );
   }
 

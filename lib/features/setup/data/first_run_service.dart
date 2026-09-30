@@ -167,6 +167,7 @@ class FirstRunService {
         'inventory.allowNegative': 'false',
         'sales.maxDiscountPercent': '100',
         'sales.allowPriceOverride': 'true',
+        'permissions.version': '${Permissions.version}',
       };
       await _database.batch((batch) {
         batch.insertAll(
