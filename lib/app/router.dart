@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/dashboard/presentation/dashboard_page.dart';
+import '../features/cashbook/presentation/cashbook_page.dart';
 import '../features/categories/presentation/categories_page.dart';
 import '../features/customers/presentation/customers_page.dart';
 import '../features/history/presentation/sales_history_page.dart';
@@ -55,6 +56,10 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/purchases',
           builder: (context, state) => const PurchasesPage(),
+        ),
+        GoRoute(
+          path: '/cashbook',
+          builder: (context, state) => const CashbookPage(),
         ),
         GoRoute(
           path: '/stores',

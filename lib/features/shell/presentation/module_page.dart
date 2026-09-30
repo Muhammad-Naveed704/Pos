@@ -127,12 +127,7 @@ const moduleDefinitions = <ModuleDefinition>[
     selectedIcon: Icons.account_balance_wallet_rounded,
     description: 'Cash sessions, pay-ins and pay-outs.',
     group: ModuleGroup.operations,
-    permission: Permissions.reportsCash,
-    planned: [
-      'Open / close cash sessions',
-      'Pay-in and pay-out entries',
-      'Expected vs counted cash',
-    ],
+    permission: Permissions.cashbookManage,
   ),
   ModuleDefinition(
     path: '/reports',

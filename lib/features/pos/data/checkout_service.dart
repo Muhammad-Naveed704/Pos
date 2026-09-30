@@ -283,6 +283,17 @@ class CheckoutService {
           .fold(Money.zero, (sum, payment) => sum + payment.amount);
       final netCash = (cashReceived - change).max(Money.zero);
       if (netCash.minorUnits > 0) {
+        // Attach to the cashier's open drawer session, if any.
+        final openSession =
+            await (_database.select(_database.cashSessions)
+                  ..where(
+                    (row) =>
+                        row.storeId.equals(session.store.id) &
+                        row.userId.equals(session.user.id) &
+                        row.status.equals('open'),
+                  )
+                  ..limit(1))
+                .getSingleOrNull();
         await _database
             .into(_database.cashTransactions)
             .insert(
@@ -290,6 +301,7 @@ class CheckoutService {
                 id: _uuid.v4(),
                 storeId: session.store.id,
                 userId: session.user.id,
+                sessionId: Value(openSession?.id),
                 type: 'cash_sale',
                 category: 'sales',
                 amount: netCash.majorUnits,
