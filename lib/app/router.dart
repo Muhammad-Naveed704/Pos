@@ -5,6 +5,7 @@ import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/categories/presentation/categories_page.dart';
 import '../features/customers/presentation/customers_page.dart';
 import '../features/history/presentation/sales_history_page.dart';
+import '../features/inventory/presentation/inventory_page.dart';
 import '../features/pos/presentation/pos_page.dart';
 import '../features/products/presentation/products_page.dart';
 import '../features/settings/presentation/settings_page.dart';
@@ -46,6 +47,10 @@ final appRouter = GoRouter(
           builder: (context, state) => const SalesHistoryPage(),
         ),
         GoRoute(path: '/users', builder: (context, state) => const UsersPage()),
+        GoRoute(
+          path: '/inventory',
+          builder: (context, state) => const InventoryPage(),
+        ),
         GoRoute(
           path: '/stores',
           builder: (context, state) => const StoresPage(),

@@ -92,11 +92,6 @@ const moduleDefinitions = <ModuleDefinition>[
     description: 'Per-store stock, movements and adjustments.',
     group: ModuleGroup.catalog,
     permission: Permissions.inventoryView,
-    planned: [
-      'Stock adjustments with reasons',
-      'Store-to-store transfers',
-      'Movement ledger per product',
-    ],
   ),
   ModuleDefinition(
     path: '/customers',
