@@ -224,8 +224,8 @@ class _DashboardBody extends StatelessWidget {
                     title: 'Inventory health',
                     icon: Icons.warehouse_outlined,
                     trailing: TextButton(
-                      onPressed: () => context.go('/products'),
-                      child: const Text('Products'),
+                      onPressed: () => context.go('/inventory'),
+                      child: const Text('Inventory'),
                     ),
                     child: Row(
                       children: [

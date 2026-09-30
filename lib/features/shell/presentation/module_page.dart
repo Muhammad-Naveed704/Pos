@@ -137,11 +137,6 @@ const moduleDefinitions = <ModuleDefinition>[
     description: 'Sales, profit and stock reporting.',
     group: ModuleGroup.operations,
     permission: Permissions.reportsView,
-    planned: [
-      'Sales by day, cashier and category',
-      'Profit and margin reports',
-      'Export to CSV and PDF',
-    ],
   ),
   ModuleDefinition(
     path: '/stores',

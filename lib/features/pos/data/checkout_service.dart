@@ -129,6 +129,7 @@ class CheckoutService {
     return _database.transaction(() async {
       final now = DateTime.now();
       final saleId = _uuid.v4();
+      final unitCosts = <String, double>{};
       for (final line in cart.lines) {
         final product = await (_database.select(
           _database.products,
@@ -148,6 +149,7 @@ class CheckoutService {
             '${line.catalogProduct.product.name} is no longer available.',
           );
         }
+        unitCosts[line.productId] = product.costPrice;
         final currentPrice = Money.fromMajor(
           storeProduct.customSalePrice ?? product.salePrice,
         );
@@ -209,6 +211,7 @@ class CheckoutService {
                 discountAmount: Value(lineTotals.discount.majorUnits),
                 taxAmount: Value(lineTotals.tax.majorUnits),
                 lineTotal: lineTotals.total.majorUnits,
+                unitCost: Value(unitCosts[line.productId] ?? 0),
               ),
             );
       }

@@ -6012,6 +6012,18 @@ class $SaleItemsTable extends SaleItems
     type: DriftSqlType.double,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _unitCostMeta = const VerificationMeta(
+    'unitCost',
+  );
+  @override
+  late final GeneratedColumn<double> unitCost = GeneratedColumn<double>(
+    'unit_cost',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -6024,6 +6036,7 @@ class $SaleItemsTable extends SaleItems
     discountAmount,
     taxAmount,
     lineTotal,
+    unitCost,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -6119,6 +6132,12 @@ class $SaleItemsTable extends SaleItems
     } else if (isInserting) {
       context.missing(_lineTotalMeta);
     }
+    if (data.containsKey('unit_cost')) {
+      context.handle(
+        _unitCostMeta,
+        unitCost.isAcceptableOrUnknown(data['unit_cost']!, _unitCostMeta),
+      );
+    }
     return context;
   }
 
@@ -6168,6 +6187,10 @@ class $SaleItemsTable extends SaleItems
         DriftSqlType.double,
         data['${effectivePrefix}line_total'],
       )!,
+      unitCost: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}unit_cost'],
+      )!,
     );
   }
 
@@ -6188,6 +6211,9 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
   final double discountAmount;
   final double taxAmount;
   final double lineTotal;
+
+  /// Cost price per unit when sold (schema v3), for profit reporting.
+  final double unitCost;
   const SaleItem({
     required this.id,
     required this.saleId,
@@ -6199,6 +6225,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     required this.discountAmount,
     required this.taxAmount,
     required this.lineTotal,
+    required this.unitCost,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -6213,6 +6240,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     map['discount_amount'] = Variable<double>(discountAmount);
     map['tax_amount'] = Variable<double>(taxAmount);
     map['line_total'] = Variable<double>(lineTotal);
+    map['unit_cost'] = Variable<double>(unitCost);
     return map;
   }
 
@@ -6228,6 +6256,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       discountAmount: Value(discountAmount),
       taxAmount: Value(taxAmount),
       lineTotal: Value(lineTotal),
+      unitCost: Value(unitCost),
     );
   }
 
@@ -6249,6 +6278,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       discountAmount: serializer.fromJson<double>(json['discountAmount']),
       taxAmount: serializer.fromJson<double>(json['taxAmount']),
       lineTotal: serializer.fromJson<double>(json['lineTotal']),
+      unitCost: serializer.fromJson<double>(json['unitCost']),
     );
   }
   @override
@@ -6265,6 +6295,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       'discountAmount': serializer.toJson<double>(discountAmount),
       'taxAmount': serializer.toJson<double>(taxAmount),
       'lineTotal': serializer.toJson<double>(lineTotal),
+      'unitCost': serializer.toJson<double>(unitCost),
     };
   }
 
@@ -6279,6 +6310,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     double? discountAmount,
     double? taxAmount,
     double? lineTotal,
+    double? unitCost,
   }) => SaleItem(
     id: id ?? this.id,
     saleId: saleId ?? this.saleId,
@@ -6290,6 +6322,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     discountAmount: discountAmount ?? this.discountAmount,
     taxAmount: taxAmount ?? this.taxAmount,
     lineTotal: lineTotal ?? this.lineTotal,
+    unitCost: unitCost ?? this.unitCost,
   );
   SaleItem copyWithCompanion(SaleItemsCompanion data) {
     return SaleItem(
@@ -6309,6 +6342,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
           : this.discountAmount,
       taxAmount: data.taxAmount.present ? data.taxAmount.value : this.taxAmount,
       lineTotal: data.lineTotal.present ? data.lineTotal.value : this.lineTotal,
+      unitCost: data.unitCost.present ? data.unitCost.value : this.unitCost,
     );
   }
 
@@ -6324,7 +6358,8 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
           ..write('unitPrice: $unitPrice, ')
           ..write('discountAmount: $discountAmount, ')
           ..write('taxAmount: $taxAmount, ')
-          ..write('lineTotal: $lineTotal')
+          ..write('lineTotal: $lineTotal, ')
+          ..write('unitCost: $unitCost')
           ..write(')'))
         .toString();
   }
@@ -6341,6 +6376,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     discountAmount,
     taxAmount,
     lineTotal,
+    unitCost,
   );
   @override
   bool operator ==(Object other) =>
@@ -6355,7 +6391,8 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
           other.unitPrice == this.unitPrice &&
           other.discountAmount == this.discountAmount &&
           other.taxAmount == this.taxAmount &&
-          other.lineTotal == this.lineTotal);
+          other.lineTotal == this.lineTotal &&
+          other.unitCost == this.unitCost);
 }
 
 class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
@@ -6369,6 +6406,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
   final Value<double> discountAmount;
   final Value<double> taxAmount;
   final Value<double> lineTotal;
+  final Value<double> unitCost;
   final Value<int> rowid;
   const SaleItemsCompanion({
     this.id = const Value.absent(),
@@ -6381,6 +6419,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     this.discountAmount = const Value.absent(),
     this.taxAmount = const Value.absent(),
     this.lineTotal = const Value.absent(),
+    this.unitCost = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SaleItemsCompanion.insert({
@@ -6394,6 +6433,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     this.discountAmount = const Value.absent(),
     this.taxAmount = const Value.absent(),
     required double lineTotal,
+    this.unitCost = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        saleId = Value(saleId),
@@ -6414,6 +6454,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     Expression<double>? discountAmount,
     Expression<double>? taxAmount,
     Expression<double>? lineTotal,
+    Expression<double>? unitCost,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -6428,6 +6469,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
       if (discountAmount != null) 'discount_amount': discountAmount,
       if (taxAmount != null) 'tax_amount': taxAmount,
       if (lineTotal != null) 'line_total': lineTotal,
+      if (unitCost != null) 'unit_cost': unitCost,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -6443,6 +6485,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     Value<double>? discountAmount,
     Value<double>? taxAmount,
     Value<double>? lineTotal,
+    Value<double>? unitCost,
     Value<int>? rowid,
   }) {
     return SaleItemsCompanion(
@@ -6456,6 +6499,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
       discountAmount: discountAmount ?? this.discountAmount,
       taxAmount: taxAmount ?? this.taxAmount,
       lineTotal: lineTotal ?? this.lineTotal,
+      unitCost: unitCost ?? this.unitCost,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -6495,6 +6539,9 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     if (lineTotal.present) {
       map['line_total'] = Variable<double>(lineTotal.value);
     }
+    if (unitCost.present) {
+      map['unit_cost'] = Variable<double>(unitCost.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -6514,6 +6561,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
           ..write('discountAmount: $discountAmount, ')
           ..write('taxAmount: $taxAmount, ')
           ..write('lineTotal: $lineTotal, ')
+          ..write('unitCost: $unitCost, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -18614,6 +18662,7 @@ typedef $$SaleItemsTableCreateCompanionBuilder = SaleItemsCompanion Function({
   Value<double> discountAmount,
   Value<double> taxAmount,
   required double lineTotal,
+  Value<double> unitCost,
   Value<int> rowid,
 });
 typedef $$SaleItemsTableUpdateCompanionBuilder = SaleItemsCompanion Function({
@@ -18627,6 +18676,7 @@ typedef $$SaleItemsTableUpdateCompanionBuilder = SaleItemsCompanion Function({
   Value<double> discountAmount,
   Value<double> taxAmount,
   Value<double> lineTotal,
+  Value<double> unitCost,
   Value<int> rowid,
 });
 
@@ -18715,6 +18765,11 @@ class $$SaleItemsTableFilterComposer
 
   ColumnFilters<double> get lineTotal => $composableBuilder(
     column: $table.lineTotal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get unitCost => $composableBuilder(
+    column: $table.unitCost,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -18814,6 +18869,11 @@ class $$SaleItemsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get unitCost => $composableBuilder(
+    column: $table.unitCost,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$SalesTableOrderingComposer get saleId {
     final $$SalesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -18900,6 +18960,9 @@ class $$SaleItemsTableAnnotationComposer
   GeneratedColumn<double> get lineTotal =>
       $composableBuilder(column: $table.lineTotal, builder: (column) => column);
 
+  GeneratedColumn<double> get unitCost =>
+      $composableBuilder(column: $table.unitCost, builder: (column) => column);
+
   $$SalesTableAnnotationComposer get saleId {
     final $$SalesTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -18985,6 +19048,7 @@ class $$SaleItemsTableTableManager
                 Value<double> discountAmount = const Value.absent(),
                 Value<double> taxAmount = const Value.absent(),
                 Value<double> lineTotal = const Value.absent(),
+                Value<double> unitCost = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SaleItemsCompanion(
                 id: id,
@@ -18997,6 +19061,7 @@ class $$SaleItemsTableTableManager
                 discountAmount: discountAmount,
                 taxAmount: taxAmount,
                 lineTotal: lineTotal,
+                unitCost: unitCost,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -19011,6 +19076,7 @@ class $$SaleItemsTableTableManager
                 Value<double> discountAmount = const Value.absent(),
                 Value<double> taxAmount = const Value.absent(),
                 required double lineTotal,
+                Value<double> unitCost = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SaleItemsCompanion.insert(
                 id: id,
@@ -19023,6 +19089,7 @@ class $$SaleItemsTableTableManager
                 discountAmount: discountAmount,
                 taxAmount: taxAmount,
                 lineTotal: lineTotal,
+                unitCost: unitCost,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -10,6 +10,7 @@ import '../features/inventory/presentation/inventory_page.dart';
 import '../features/pos/presentation/pos_page.dart';
 import '../features/products/presentation/products_page.dart';
 import '../features/purchases/presentation/purchases_page.dart';
+import '../features/reports/presentation/reports_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/shell/presentation/app_shell.dart';
 import '../features/shell/presentation/module_page.dart';
@@ -60,6 +61,10 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/cashbook',
           builder: (context, state) => const CashbookPage(),
+        ),
+        GoRoute(
+          path: '/reports',
+          builder: (context, state) => const ReportsPage(),
         ),
         GoRoute(
           path: '/stores',

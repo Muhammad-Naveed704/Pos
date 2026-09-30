@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:storeflow_pos/core/database/app_database.dart';
@@ -13,8 +14,8 @@ void main() {
 
   tearDown(() => database.close());
 
-  test('migration creates the complete version two schema', () async {
-    expect(database.schemaVersion, 2);
+  test('migration creates the complete current schema', () async {
+    expect(database.schemaVersion, 3);
     final rows = await database
         .customSelect(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -94,6 +95,9 @@ void main() {
       ]) {
         await migrationDatabase.customStatement('DROP INDEX IF EXISTS $index');
       }
+      await migrationDatabase.customStatement(
+        'ALTER TABLE sale_items DROP COLUMN unit_cost',
+      );
       await migrationDatabase.customStatement('PRAGMA user_version = 1');
       await migrationDatabase.close();
       migrationDatabase = null;
@@ -111,10 +115,122 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 2);
+      expect(version.read<int>('user_version'), 3);
     } finally {
       await migrationDatabase?.close();
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     }
   });
+
+  test(
+    'version two database gains sale cost snapshots without data loss',
+    () async {
+      await database.close();
+      final directory = await Directory.systemTemp.createTemp('storeflow-v3-');
+      final file = File(
+        '${directory.path}${Platform.pathSeparator}storeflow.db',
+      );
+      AppDatabase? db;
+      try {
+        db = AppDatabase(executor: NativeDatabase(file));
+        final now = DateTime(2026, 5, 1);
+        await db
+            .into(db.stores)
+            .insert(
+              StoresCompanion.insert(
+                id: 's1',
+                name: 'Store',
+                code: 'S1',
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        await db
+            .into(db.roles)
+            .insert(
+              RolesCompanion.insert(
+                id: 'r1',
+                name: 'Owner',
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        await db
+            .into(db.users)
+            .insert(
+              UsersCompanion.insert(
+                id: 'u1',
+                username: 'owner',
+                displayName: 'Owner',
+                passwordHash: 'x',
+                passwordSalt: 'y',
+                roleId: 'r1',
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        await db
+            .into(db.products)
+            .insert(
+              ProductsCompanion.insert(
+                id: 'p1',
+                sku: 'P1',
+                name: 'Kettle',
+                salePrice: 900,
+                costPrice: const Value(640),
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        await db
+            .into(db.sales)
+            .insert(
+              SalesCompanion.insert(
+                id: 'sale1',
+                invoiceNumber: 'S1-2026-000001',
+                storeId: 's1',
+                userId: 'u1',
+                subtotal: 900,
+                grandTotal: 900,
+                paymentStatus: 'paid',
+                saleStatus: 'completed',
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        await db.customStatement(
+          'ALTER TABLE sale_items DROP COLUMN unit_cost',
+        );
+        await db.customStatement(
+          "INSERT INTO sale_items (id, sale_id, product_id, product_name_snapshot, sku_snapshot, qty, unit_price, discount_amount, tax_amount, line_total) "
+          "VALUES ('i1', 'sale1', 'p1', 'Kettle', 'P1', 1, 900, 0, 0, 900)",
+        );
+        await db.customStatement('PRAGMA user_version = 2');
+        await db.close();
+        db = null;
+
+        final upgraded = AppDatabase(executor: NativeDatabase(file));
+        db = upgraded;
+        final item = await upgraded.select(upgraded.saleItems).getSingle();
+        expect(item.productNameSnapshot, 'Kettle');
+        expect(item.lineTotal, 900);
+        expect(item.unitCost, 640, reason: 'backfilled from the product cost');
+        final sale = await upgraded.select(upgraded.sales).getSingle();
+        expect(sale.invoiceNumber, 'S1-2026-000001');
+        final version = await upgraded
+            .customSelect('PRAGMA user_version')
+            .getSingle();
+        expect(version.read<int>('user_version'), 3);
+        final index = await upgraded
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_stock_store_created'",
+            )
+            .get();
+        expect(index, hasLength(1));
+      } finally {
+        await db?.close();
+        if (directory.existsSync()) directory.deleteSync(recursive: true);
+      }
+    },
+  );
 }

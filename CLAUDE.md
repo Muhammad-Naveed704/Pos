@@ -34,17 +34,26 @@ implemented. The current usable scope is:
 - Persistent theme/accessibility settings (presets, Windows accent, custom
   colour, density, text size, radius, motion)
 - Database-backed business settings: currency, number format, tax mode/label,
-  tax registration number, receipt header/footer, discount and stock rules
+  tax registration number, discount and stock rules
+- Receipt designer (58/80 mm thermal, A4/A5 invoice, logo, contact lines,
+  policy, toggles), live preview, per-PC printer and direct print
+- Bulk CSV import/export for products (auto-creates categories) and customers
+- Custom roles, bulk role creation and a roles × permissions matrix
+- Inventory: stock list, adjustments with reasons, stock counts, store
+  transfers, movement ledger
+- Purchases: suppliers, stock receiving (GRN), supplier returns
+- Cashbook: drawer sessions, pay-ins/outs, closing count with over/short
+- Reports: sales summary, daily, products (profit), categories, cashiers,
+  payment methods, purchases, stock valuation; CSV and PDF export
+- Offline password recovery key, change own password
+- USB barcode scanner capture on the POS even when search is not focused
 
-Do not describe these placeholder modules as implemented:
+Not implemented yet (do not describe as done):
 
-- `/inventory`: dedicated movement/adjustment/transfer UI
-- `/purchases`: suppliers, purchase receiving, returns
-- `/cashbook`: cash sessions and full cashbook UI
-- `/reports`: advanced reporting/charts/export
 - Backup/restore workflow
-- CSV import/export
-- Sale void/refund workflow
+- Sale void/refund workflow (permissions exist, no UI/service)
+- Customer credit sales and supplier payables/balances
+- UI translations (all text is English)
 
 The database already contains supporting tables/permissions for some future
 modules. Their presence does not mean their workflows are complete.
@@ -152,8 +161,15 @@ method must repeat its permission check even when its button/route is hidden.
 - `/history` — implemented sales search/detail/receipt actions
 - `/users` — implemented users and role-permission editor
 - `/stores` — implemented branch management
-- `/settings` — implemented appearance, business & regional, checkout & receipt
-- `/inventory`, `/purchases`, `/cashbook`, `/reports` — placeholders
+- `/settings` — appearance, business & regional, checkout & tax, receipt
+  designer, security
+- `/inventory` — stock, adjustments, counts, transfers, movement ledger
+- `/purchases` — receiving, supplier returns, suppliers
+- `/cashbook` — cash sessions, pay-ins/outs, closing count
+- `/reports` — sales/profit/payment/purchase/stock reports with export
+
+`ModuleDefinition.planned` still exists for future placeholder modules; a
+module with a non-empty `planned` list is routed to `ModulePage`.
 
 Navigation visibility is permission-filtered in `AppShell`, using module metadata
 from `features/shell/presentation/module_page.dart`. Route visibility is not a
@@ -180,7 +196,7 @@ The connection enables:
 - 5-second busy timeout
 - Drift/sqlite3 prepared-statement reuse
 
-Current schema version: **2**.
+Current schema version: **3**.
 
 The 21 tables are:
 
@@ -208,7 +224,16 @@ The 21 tables are:
 
 Version 1 created all tables and the base lookup/history indexes. Version 2 adds
 non-destructive indexes for scoped settings, users/store status, category trees,
-exact barcode/SKU lookup, held carts, and payment methods.
+exact barcode/SKU lookup, held carts, and payment methods. Version 3 adds
+`sale_items.unit_cost` (cost snapshot at sale time, backfilled from the current
+product cost for older sales) and indexes for stock ledgers, purchases, cash
+sessions and sale-item product lookups.
+
+**Dates are stored as unix seconds.** Drift's default DateTime storage is an
+INTEGER, so SQL date functions must use the `'unixepoch'` modifier, e.g.
+`date(created_at, 'unixepoch', 'localtime')`. Without it SQLite reads the value
+as a Julian day and returns NULL (this made the dashboard show zero sales until
+it was fixed). Range filters should bind `Variable.withDateTime` instead.
 
 ### Migration rules
 
@@ -301,9 +326,18 @@ First-run setup creates Owner, Admin, Manager, Cashier, and Inventory Staff.
 Owner receives every permission. Owner permissions cannot be reduced.
 
 Permission constants live only in
-`lib/features/auth/domain/permissions.dart`. Reuse constants rather than typing
-permission strings elsewhere. Existing families cover POS, products, customers,
-inventory, reports, users, and settings.
+`lib/features/auth/domain/permissions.dart`, with human-readable labels in
+`PermissionCatalog`. Reuse constants rather than typing permission strings
+elsewhere. Families cover POS, products, customers, inventory, purchases,
+cashbook, reports, users, and settings.
+
+The Owner (built-in role named `Owner`) resolves to `Permissions.all` at
+sign-in, so new permissions reach it automatically. When adding permissions,
+bump `Permissions.version` and list them in `Permissions.introduced`;
+`PermissionUpgrade` (run at sign-in) grants them once to built-in roles whose
+default set includes them, without undoing admin edits. `RoleRepository`
+blocks granting permissions the editor does not hold, deleting built-in or
+in-use roles, and reducing the Owner.
 
 When adding a protected action:
 
@@ -316,10 +350,12 @@ When adding a protected action:
 ## First-run setup
 
 The setup wizard collects business/store identity, address/phone, owner username
-and password, currency, timezone, tax behavior, and receipt footer. The service
-creates the store, five default roles, all-store Owner user, default settings,
-invoice sequence, and setup audit record in one transaction. Normal application
-navigation is blocked until setup succeeds.
+and password, currency, number format, timezone, tax behavior/label, and receipt
+footer. The service creates the store, five default roles, all-store Owner user,
+default settings, invoice sequence, a one-time account recovery key (only its
+PBKDF2 hash is stored) and the setup audit record in one transaction, then
+shows the key once. Normal application navigation is blocked until setup
+succeeds.
 
 Do not ship seed/demo records in this path. Test fixtures may create isolated data.
 
@@ -336,6 +372,15 @@ Do not ship seed/demo records in this path. Test fixtures may create isolated da
 - `CheckoutService`: complete atomic sale transaction
 - `SalesRepository`: store-scoped filtered history and sale details
 - `ReceiptService`: background PDF generation, printer output, and save dialog
+- `BusinessSettingsRepository`: audited business/receipt settings
+- `AccountRecoveryService`: recovery key, password reset, change own password
+- `ProductImportService` / `CustomerImportService`: two-phase CSV import
+  (prepare → preview → apply in one transaction) and export
+- `RoleRepository` (+ `PermissionUpgrade`): custom roles and bulk permissions
+- `InventoryService`: stock list, adjustments, counts, transfers, ledger
+- `PurchaseService`: suppliers, receiving, supplier returns
+- `CashbookService`: drawer sessions, pay-ins/outs, closing count
+- `ReportsService`: date-ranged reports returning a uniform `ReportResult`
 
 ## POS behavior
 
@@ -375,8 +420,14 @@ separate widget state. Tracked products cannot be added beyond stock unless
 `inventory.allowNegative` is on. An unmatched scan shows a toast; if exactly
 one search result is visible, Enter adds it.
 
-The focused search field supports ordinary USB barcode scanners. There is no
-global scanner buffer when focus is elsewhere.
+USB (keyboard-wedge) barcode scanners work anywhere on the POS page:
+`ScannerKeyBuffer` captures keystrokes while the POS page has focus but the
+search field does not, delivers Enter-terminated bursts as scans, and moves
+slower typing into the search field after 350 ms. It never captures input in
+dialogs or on the lock screen. Camera scanning is not supported on Windows.
+
+Cash sales are attached to the cashier's open cash session (if any) inside the
+checkout transaction.
 
 ## Atomic checkout invariant
 
@@ -420,14 +471,14 @@ unchanged. Do not silently change contains search to prefix-only behavior.
 Sales history is store-scoped and supports date, invoice, customer, cashier,
 payment method, and status filters. Actions are view detail, print, and save PDF.
 
-Receipt PDF generation uses an 80mm thermal roll layout and runs in a background
-isolate. It includes store details, invoice/date, cashier/customer, item snapshots,
-discount/tax totals, tenders, received amount, and change.
-
-Receipts take `BusinessSettings`: business name, store, optional header, tax
-registration number, configured tax label, footer and currency format. The
-built-in PDF font is Latin-1 only, so symbols such as ₹ or ৳ print as the ISO
-code; bundle a Unicode font before printing native symbols.
+Receipt PDF generation runs in a background isolate and follows the receipt
+designer (`ReceiptLayout` inside `BusinessSettings`, keys `receipt.*`). Roll
+paper (58/80 mm) has infinite height and must be a single `pw.Page`;
+`pw.MultiPage` asserts on infinite height (this broke print and Save PDF).
+A4/A5 use `MultiPage` with a tabular invoice. Windows Segoe UI (with Nirmala UI
+fallback) is loaded from the Windows fonts folder so Unicode currency symbols
+print; without it the ISO code is used. Printer choice and direct printing are
+per-PC SharedPreferences, not business settings.
 
 ## Tests and last verified state
 
@@ -446,6 +497,11 @@ used. Current coverage includes:
 - Forced checkout rollback
 - Held-cart save/restore/remove without stock mutation
 - Money formatting/parsing across number styles and decimal separators
+- Receipt PDFs for all paper sizes, scanner buffering, recovery keys
+- CSV import (categories, stock movements, validation, permissions)
+- Roles, permission escalation guard and permission upgrade
+- Inventory adjustments/counts/transfers, purchases, cashbook sessions
+- Reports and dashboard figures (unix-epoch date regression), v2→v3 migration
 - Business settings load, permission denial, persistence, audit and fallbacks
 - Gate text-input regression (edit/delete/retype on login and setup) and
   legacy theme-preference migration
@@ -455,7 +511,7 @@ Last verified before this handoff:
 
 - `dart format .` — clean
 - `flutter analyze` — zero issues
-- `flutter test` — 32 tests passed
+- `flutter test` — 63 tests passed
 - Windows release build — passed at the current root
 
 Always repeat format, analyze, tests, and release build after material changes.
@@ -464,13 +520,11 @@ Always repeat format, analyze, tests, and release build after material changes.
 
 The intended next phases are:
 
-1. Dedicated inventory movement/adjustment/transfer workflows
-2. Suppliers and purchase receiving/returns
-3. Cash sessions and cashbook
-4. Void/refund flows with compensating stock/cash/audit transactions
-5. Reports and background export/import
-6. Checksum-verified backup/restore with safety snapshots
-7. Release packaging, accessibility/profile hardening, then MSIX/signing
+1. Void/refund flows with compensating stock/cash/audit transactions
+2. Customer credit sales and supplier payables
+3. Checksum-verified backup/restore with safety snapshots
+4. UI translations (Urdu/Arabic with RTL)
+5. Release packaging, accessibility/profile hardening, then MSIX/signing
 
 Do not begin several phases in one unreviewable change. Build vertical slices with
 domain rules, service transaction, repository queries, desktop UI, and tests.
@@ -492,8 +546,11 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
   them; never create or re-sync a controller from `build()`. Key
   `DropdownButtonFormField`s (they read `initialValue` once) when their data
   can be reloaded.
-- Do not call a repository future inside `build()` (`FutureBuilder(future:
-  _load())`); cache the future and refresh it on real filter changes.
+- Do not call a repository future or create a Drift `watch()` stream inside
+  `build()`; cache it in state and rebind only when a filter changes
+  (a new stream instance makes `StreamBuilder` resubscribe and flicker).
+- Order ledgers by `created_at` and then `rowid`; timestamps have one-second
+  precision.
 - Preserve unrelated user changes; inspect the working tree before editing.
 - Run build_runner after Drift schema changes and all quality gates before handoff.
 

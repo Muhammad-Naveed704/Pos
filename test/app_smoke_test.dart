@@ -63,6 +63,24 @@ void main() {
     await tester.pump();
     expect(find.text('Sales history'), findsWidgets);
 
+    for (final (route, text) in const [
+      ('/inventory', 'Stock count'),
+      ('/purchases', 'Receive stock'),
+      ('/cashbook', 'Open session'),
+      ('/reports', 'Sales summary'),
+      ('/users', 'Roles & permissions'),
+      ('/products', 'Import / Export'),
+      ('/customers', 'Import / Export'),
+    ]) {
+      appRouter.go(route);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      expect(find.text(text), findsWidgets, reason: route);
+    }
+
     await tester.pumpWidget(const SizedBox.shrink());
     container.dispose();
     await tester.pump(const Duration(milliseconds: 1));

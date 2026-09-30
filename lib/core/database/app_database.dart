@@ -170,6 +170,9 @@ class SaleItems extends Table {
   RealColumn get taxAmount => real().withDefault(const Constant(0))();
   RealColumn get lineTotal => real()();
 
+  /// Cost price per unit when sold (schema v3), for profit reporting.
+  RealColumn get unitCost => real().withDefault(const Constant(0))();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -355,7 +358,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -363,10 +366,21 @@ class AppDatabase extends _$AppDatabase {
       await migrator.createAll();
       await _createIndexes();
       await _createPhaseTwoIndexes();
+      await _createPhaseThreeIndexes();
     },
     onUpgrade: (migrator, from, to) async {
       if (from < 2) {
         await _createPhaseTwoIndexes();
+      }
+      if (from < 3) {
+        await migrator.addColumn(saleItems, saleItems.unitCost);
+        // Historic sales had no cost snapshot; use the current product cost
+        // as the best available estimate.
+        await customStatement(
+          'UPDATE sale_items SET unit_cost = COALESCE('
+          '(SELECT cost_price FROM products WHERE products.id = sale_items.product_id), 0)',
+        );
+        await _createPhaseThreeIndexes();
       }
     },
     beforeOpen: (details) async {
@@ -410,6 +424,20 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_products_sku_active ON products(sku, is_active)',
       'CREATE INDEX IF NOT EXISTS idx_held_carts_store_user_updated ON held_carts(store_id, user_id, updated_at DESC)',
       'CREATE INDEX IF NOT EXISTS idx_payments_method_created ON payments(method, created_at DESC)',
+    ];
+    for (final statement in statements) {
+      await customStatement(statement);
+    }
+  }
+
+  Future<void> _createPhaseThreeIndexes() async {
+    const statements = [
+      'CREATE INDEX IF NOT EXISTS idx_stock_store_created ON stock_movements(store_id, created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_purchases_store_created ON purchases(store_id, created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id)',
+      'CREATE INDEX IF NOT EXISTS idx_cash_sessions_store_user_status ON cash_sessions(store_id, user_id, status)',
+      'CREATE INDEX IF NOT EXISTS idx_cash_transactions_session ON cash_transactions(session_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id)',
     ];
     for (final statement in statements) {
       await customStatement(statement);

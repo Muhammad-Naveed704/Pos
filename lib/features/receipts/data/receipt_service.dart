@@ -384,6 +384,19 @@ _Fonts _fonts() {
   return _Fonts(base, bold, fallback);
 }
 
+/// PDF theme using Windows system fonts when available (Unicode currency
+/// symbols and scripts); falls back to the built-in Latin-1 fonts.
+pw.ThemeData pdfSystemTheme() {
+  final fonts = _fonts();
+  return fonts.unicode
+      ? pw.ThemeData.withFont(
+          base: fonts.base,
+          bold: fonts.bold,
+          fontFallback: fonts.fallback,
+        )
+      : pw.ThemeData();
+}
+
 /// Built-in PDF fonts only cover Latin-1 plus the euro sign.
 bool _latin1(String text) =>
     text.runes.every((rune) => rune <= 0xFF || rune == 0x20AC);

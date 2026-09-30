@@ -49,6 +49,8 @@ class DashboardMetrics {
   double get averageSale => invoices == 0 ? 0 : sales / invoices;
 }
 
+// Drift stores DateTime as unix seconds, so SQL date functions need the
+// 'unixepoch' modifier before 'localtime'.
 final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
   ref,
 ) async {
@@ -56,7 +58,8 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
   final session = ref.watch(activeSessionProvider);
   if (session == null) throw StateError('Authentication required.');
   final store = Variable.withString(session.store.id);
-  const today = "date(created_at, 'localtime') = date('now', 'localtime')";
+  const today =
+      "date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')";
   final row = await database
       .customSelect(
         '''
@@ -65,7 +68,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
         WHERE store_id = ?1 AND sale_status = 'completed' AND $today), 0.0) AS sales,
       COALESCE((SELECT SUM(grand_total) FROM sales
         WHERE store_id = ?1 AND sale_status = 'completed'
-          AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')), 0.0) AS yesterday,
+          AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime', '-1 day')), 0.0) AS yesterday,
       (SELECT COUNT(*) FROM sales
         WHERE store_id = ?1 AND sale_status = 'completed' AND $today) AS invoices,
       (SELECT COUNT(*) FROM customers WHERE is_active = 1) AS customers,
@@ -75,7 +78,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
       COALESCE((SELECT SUM(payments.amount) FROM payments
         JOIN sales ps ON ps.id = payments.sale_id
         WHERE ps.store_id = ?1 AND ps.sale_status = 'completed' AND payments.method = 'cash'
-          AND date(payments.created_at, 'localtime') = date('now', 'localtime')), 0.0)
+          AND date(payments.created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0)
       - COALESCE((SELECT SUM(change_amount) FROM sales
         WHERE store_id = ?1 AND sale_status = 'completed' AND $today), 0.0) AS cash_collected,
       (SELECT COUNT(*) FROM product_stores
@@ -90,7 +93,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
   final hourlyRows = await database
       .customSelect(
         '''
-    SELECT CAST(strftime('%H', created_at, 'localtime') AS INTEGER) AS hour,
+    SELECT CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
            SUM(grand_total) AS total
     FROM sales
     WHERE store_id = ?1 AND sale_status = 'completed' AND $today
@@ -107,10 +110,10 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
   final weekRows = await database
       .customSelect(
         '''
-    SELECT date(created_at, 'localtime') AS day, SUM(grand_total) AS total
+    SELECT date(created_at, 'unixepoch', 'localtime') AS day, SUM(grand_total) AS total
     FROM sales
     WHERE store_id = ?1 AND sale_status = 'completed'
-      AND date(created_at, 'localtime') >= date('now', 'localtime', '-6 day')
+      AND date(created_at, 'unixepoch', 'localtime') >= date('now', 'localtime', '-6 day')
     GROUP BY day
   ''',
         variables: [store],
@@ -140,7 +143,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
     WHERE s.store_id = ?1 AND s.sale_status = 'completed'
-      AND date(s.created_at, 'localtime') >= date('now', 'localtime', '-6 day')
+      AND date(s.created_at, 'unixepoch', 'localtime') >= date('now', 'localtime', '-6 day')
     GROUP BY si.product_id, si.product_name_snapshot
     ORDER BY revenue DESC
     LIMIT 5
@@ -156,7 +159,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
     FROM payments p
     JOIN sales s ON s.id = p.sale_id
     WHERE s.store_id = ?1 AND s.sale_status = 'completed'
-      AND date(p.created_at, 'localtime') = date('now', 'localtime')
+      AND date(p.created_at, 'unixepoch', 'localtime') = date('now', 'localtime')
     GROUP BY p.method
   ''',
         variables: [store],
