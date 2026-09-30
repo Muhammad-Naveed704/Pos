@@ -8,6 +8,7 @@ import '../features/history/presentation/sales_history_page.dart';
 import '../features/inventory/presentation/inventory_page.dart';
 import '../features/pos/presentation/pos_page.dart';
 import '../features/products/presentation/products_page.dart';
+import '../features/purchases/presentation/purchases_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/shell/presentation/app_shell.dart';
 import '../features/shell/presentation/module_page.dart';
@@ -50,6 +51,10 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/inventory',
           builder: (context, state) => const InventoryPage(),
+        ),
+        GoRoute(
+          path: '/purchases',
+          builder: (context, state) => const PurchasesPage(),
         ),
         GoRoute(
           path: '/stores',

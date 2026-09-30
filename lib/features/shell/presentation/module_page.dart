@@ -118,12 +118,7 @@ const moduleDefinitions = <ModuleDefinition>[
     selectedIcon: Icons.local_shipping_rounded,
     description: 'Suppliers, purchase receiving and returns.',
     group: ModuleGroup.operations,
-    permission: Permissions.inventoryView,
-    planned: [
-      'Supplier directory',
-      'Purchase orders and receiving',
-      'Supplier returns',
-    ],
+    permission: Permissions.purchasesView,
   ),
   ModuleDefinition(
     path: '/cashbook',
