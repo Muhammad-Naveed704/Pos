@@ -21,6 +21,8 @@ import '../application/cart_controller.dart';
 import '../data/checkout_service.dart';
 import '../data/held_cart_repository.dart';
 import '../domain/pos_cart.dart';
+import '../../receipts/presentation/receipt_preview.dart';
+import 'barcode_scanner.dart';
 import 'payment_dialog.dart';
 import 'pos_dialogs.dart';
 
@@ -38,9 +40,46 @@ class _PosPageState extends ConsumerState<PosPage> {
   String? _categoryId;
   bool _busy = false;
   List<CatalogProduct> _visible = const [];
+  final _pageFocus = FocusNode(debugLabel: 'pos-page');
+  late final ScannerKeyBuffer _scanner = ScannerKeyBuffer(
+    isActive: () =>
+        mounted &&
+        _pageFocus.hasFocus &&
+        !_searchFocus.hasFocus &&
+        !(ref.read(activeSessionProvider)?.isLocked ?? true),
+    onScan: (code) {
+      _flashScan(code);
+      _searchSubmitted(code);
+    },
+    onTyped: (text) {
+      _search.text = text;
+      _search.selection = TextSelection.collapsed(offset: text.length);
+      _searchFocus.requestFocus();
+      setState(() => _term = text.trim());
+    },
+  );
+  String? _lastScan;
+  Timer? _scanFlash;
+
+  @override
+  void initState() {
+    super.initState();
+    _scanner.attach();
+  }
+
+  void _flashScan(String code) {
+    _scanFlash?.cancel();
+    setState(() => _lastScan = code);
+    _scanFlash = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _lastScan = null);
+    });
+  }
 
   @override
   void dispose() {
+    _scanner.detach();
+    _scanFlash?.cancel();
+    _pageFocus.dispose();
     _debounce?.cancel();
     _search.dispose();
     _searchFocus.dispose();
@@ -139,6 +178,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         const SingleActivator(LogicalKeyboardKey.f10): _payment,
       },
       child: Focus(
+        focusNode: _pageFocus,
         autofocus: true,
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -148,7 +188,7 @@ class _PosPageState extends ConsumerState<PosPage> {
               Expanded(child: _catalog(session.store.id, money)),
               const SizedBox(width: 16),
               SizedBox(
-                width: 430,
+                width: 440,
                 child: _CartPanel(
                   cart: cart,
                   totals: totals,
@@ -208,9 +248,16 @@ class _PosPageState extends ConsumerState<PosPage> {
                 suffixIcon: ListenableBuilder(
                   listenable: _search,
                   builder: (context, _) => _search.text.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: KeyHint('F2'),
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _ScannerStatus(lastScan: _lastScan),
+                              const SizedBox(width: 8),
+                              const KeyHint('F2'),
+                            ],
+                          ),
                         )
                       : IconButton(
                           tooltip: 'Clear',
@@ -497,7 +544,12 @@ class _PosPageState extends ConsumerState<PosPage> {
         result: result,
         money: _money,
       );
-      if (action == SaleCompleteAction.print ||
+      if (action == SaleCompleteAction.preview) {
+        final details = await ref
+            .read(salesRepositoryProvider)
+            .details(session, result.saleId);
+        if (mounted) await showReceiptPreview(context, ref, details);
+      } else if (action == SaleCompleteAction.print ||
           action == SaleCompleteAction.savePdf) {
         final details = await ref
             .read(salesRepositoryProvider)
@@ -960,7 +1012,7 @@ class _CartPanel extends ConsumerWidget {
                             children: [
                               Flexible(
                                 child: Text(
-                                  'Exact cash',
+                                  'Exact',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontWeight: FontWeight.w700),
@@ -1239,4 +1291,53 @@ class _AmountRow extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _ScannerStatus extends StatelessWidget {
+  const _ScannerStatus({this.lastScan});
+  final String? lastScan;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final scanned = lastScan != null;
+    return Tooltip(
+      message: 'USB barcode scanners work anywhere on this screen. Just scan.',
+      child: AnimatedContainer(
+        duration: tokens.motion(150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: scanned
+              ? tokens.successContainer
+              : context.colors.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              scanned ? Icons.check_circle_rounded : Icons.sensors_rounded,
+              size: 14,
+              color: scanned ? tokens.success : context.colors.primary,
+            ),
+            const SizedBox(width: 5),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 160),
+              child: Text(
+                scanned ? lastScan! : 'Scanner ready',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: scanned
+                      ? tokens.success
+                      : context.colors.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

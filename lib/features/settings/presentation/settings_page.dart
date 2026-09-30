@@ -12,6 +12,8 @@ import '../../auth/domain/permissions.dart';
 import '../../pos/domain/pos_cart.dart';
 import '../data/business_settings_repository.dart';
 import '../domain/business_settings.dart';
+import 'receipt_designer.dart';
+import 'security_settings.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -22,7 +24,7 @@ class SettingsPage extends ConsumerWidget {
         .watch(activeSessionProvider)!
         .can(Permissions.settingsManage);
     return DefaultTabController(
-      length: canManage ? 3 : 1,
+      length: canManage ? 5 : 1,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
         child: Column(
@@ -48,8 +50,13 @@ class SettingsPage extends ConsumerWidget {
                   ),
                   Tab(
                     icon: Icon(Icons.point_of_sale_rounded),
-                    text: 'Checkout & receipt',
+                    text: 'Checkout & tax',
                   ),
+                  Tab(
+                    icon: Icon(Icons.receipt_long_rounded),
+                    text: 'Receipt designer',
+                  ),
+                  Tab(icon: Icon(Icons.security_rounded), text: 'Security'),
                 ],
               ],
             ),
@@ -60,6 +67,8 @@ class SettingsPage extends ConsumerWidget {
                   if (canManage) ...const [
                     _BusinessForm(section: _Section.regional),
                     _BusinessForm(section: _Section.checkout),
+                    ReceiptDesigner(),
+                    SecuritySettings(),
                   ],
                 ],
               ),
@@ -225,6 +234,7 @@ class _AppearanceTab extends ConsumerWidget {
                 control: SizedBox(
                   width: 260,
                   child: DropdownButtonFormField<String>(
+                    menuMaxHeight: 360,
                     initialValue: settings.fontFamily,
                     isExpanded: true,
                     items: [
@@ -590,8 +600,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
   final _name = TextEditingController();
   final _taxLabel = TextEditingController();
   final _taxNumber = TextEditingController();
-  final _header = TextEditingController();
-  final _footer = TextEditingController();
   final _maxDiscount = TextEditingController();
   final _denominations = TextEditingController();
   bool _saving = false;
@@ -609,8 +617,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
       _name,
       _taxLabel,
       _taxNumber,
-      _header,
-      _footer,
       _maxDiscount,
       _denominations,
     ]) {
@@ -628,8 +634,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
     _name.text = value.businessName;
     _taxLabel.text = value.taxLabel;
     _taxNumber.text = value.taxNumber;
-    _header.text = value.receiptHeader;
-    _footer.text = value.receiptFooter;
     _maxDiscount.text =
         value.maxDiscountPercent == value.maxDiscountPercent.roundToDouble()
         ? value.maxDiscountPercent.toStringAsFixed(0)
@@ -641,8 +645,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
     businessName: _name.text,
     taxLabel: _taxLabel.text,
     taxNumber: _taxNumber.text,
-    receiptHeader: _header.text,
-    receiptFooter: _footer.text,
     maxDiscountPercent: (parseAmount(_maxDiscount.text) ?? 100)
         .clamp(0, 100)
         .toDouble(),
@@ -670,8 +672,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
         taxMode: form.taxMode,
         taxLabel: form.taxLabel,
         taxNumber: form.taxNumber,
-        receiptHeader: form.receiptHeader,
-        receiptFooter: form.receiptFooter,
         maxDiscountPercent: form.maxDiscountPercent,
         allowPriceOverride: form.allowPriceOverride,
         allowNegativeStock: form.allowNegativeStock,
@@ -847,6 +847,7 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    menuMaxHeight: 360,
                     initialValue: _draft.currencyCode,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'Currency'),
@@ -867,6 +868,7 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<NumberStyle>(
+                    menuMaxHeight: 360,
                     initialValue: _draft.numberStyle,
                     isExpanded: true,
                     decoration: const InputDecoration(
@@ -919,18 +921,27 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
       SectionCard(
         title: 'Time zone',
         icon: Icons.schedule_rounded,
-        child: DropdownButtonFormField<String>(
-          initialValue: commonTimezones.contains(_draft.timezone)
-              ? _draft.timezone
-              : null,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Business time zone'),
-          items: [
-            for (final zone in commonTimezones)
-              DropdownMenuItem(value: zone, child: Text(zone)),
-          ],
-          onChanged: (value) =>
-              _edit((draft) => draft.copyWith(timezone: value)),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: 380,
+            child: DropdownButtonFormField<String>(
+              menuMaxHeight: 360,
+              initialValue: commonTimezones.contains(_draft.timezone)
+                  ? _draft.timezone
+                  : null,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Business time zone',
+              ),
+              items: [
+                for (final zone in commonTimezones)
+                  DropdownMenuItem(value: zone, child: Text(zone)),
+              ],
+              onChanged: (value) =>
+                  _edit((draft) => draft.copyWith(timezone: value)),
+            ),
+          ),
         ),
       ),
     ];
@@ -1037,23 +1048,6 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
             onChanged: (value) =>
                 _edit((draft) => draft.copyWith(allowNegativeStock: value)),
           ),
-        ],
-      ),
-    ),
-    const SizedBox(height: 16),
-    SectionCard(
-      title: 'Receipt',
-      icon: Icons.receipt_rounded,
-      child: Column(
-        children: [
-          _field(
-            _header,
-            'Receipt header',
-            helper: 'Optional line under the store address.',
-            maxLines: 2,
-          ),
-          const SizedBox(height: 12),
-          _field(_footer, 'Receipt footer', maxLines: 2),
         ],
       ),
     ),

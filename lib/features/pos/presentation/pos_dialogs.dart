@@ -808,7 +808,7 @@ class _HeldCarts extends ConsumerWidget {
 // Sale completed
 // ---------------------------------------------------------------------------
 
-enum SaleCompleteAction { done, print, savePdf }
+enum SaleCompleteAction { done, print, savePdf, preview }
 
 Future<SaleCompleteAction?> showSaleCompleteDialog(
   BuildContext context, {
@@ -823,6 +823,8 @@ Future<SaleCompleteAction?> showSaleCompleteDialog(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyP): () =>
             Navigator.pop(context, SaleCompleteAction.print),
+        const SingleActivator(LogicalKeyboardKey.keyV): () =>
+            Navigator.pop(context, SaleCompleteAction.preview),
       },
       child: AlertDialog(
         icon: Container(
@@ -868,6 +870,11 @@ Future<SaleCompleteAction?> showSaleCompleteDialog(
         ),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context, SaleCompleteAction.preview),
+            icon: const Icon(Icons.visibility_outlined),
+            label: const Text('Preview  (V)'),
+          ),
           OutlinedButton.icon(
             onPressed: () => Navigator.pop(context, SaleCompleteAction.savePdf),
             icon: const Icon(Icons.picture_as_pdf_outlined),

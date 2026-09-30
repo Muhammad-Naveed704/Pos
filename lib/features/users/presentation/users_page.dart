@@ -124,6 +124,7 @@ class UsersPage extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DropdownButtonFormField<String>(
+                    menuMaxHeight: 360,
                     initialValue: selected.id,
                     decoration: const InputDecoration(labelText: 'Role'),
                     items: roles
@@ -245,6 +246,7 @@ class UsersPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
+                  menuMaxHeight: 360,
                   initialValue: roleId,
                   decoration: const InputDecoration(labelText: 'Role'),
                   items: roles
@@ -259,6 +261,7 @@ class UsersPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
+                  menuMaxHeight: 360,
                   initialValue: storeId,
                   decoration: const InputDecoration(labelText: 'Store scope'),
                   items: [

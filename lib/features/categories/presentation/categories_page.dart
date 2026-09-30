@@ -134,6 +134,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String?>(
+                  menuMaxHeight: 360,
                   initialValue: parentId,
                   decoration: const InputDecoration(labelText: 'Parent'),
                   items: [

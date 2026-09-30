@@ -6,6 +6,7 @@ import '../../../core/money/money_format.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../receipts/data/receipt_service.dart';
+import '../../receipts/presentation/receipt_preview.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../data/sales_repository.dart';
 
@@ -271,13 +272,7 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
   }
 
   Future<void> _pickRange() async {
-    final now = DateTime.now();
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(now.year, now.month, now.day),
-      initialDateRange: _range,
-    );
+    final picked = await pickDateRange(context, initial: _range);
     if (picked != null) _refresh(() => _range = picked);
   }
 
@@ -290,6 +285,7 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
   }) => SizedBox(
     width: width,
     child: DropdownButtonFormField<String?>(
+      menuMaxHeight: 360,
       isExpanded: true,
       initialValue: value,
       decoration: InputDecoration(labelText: label),
@@ -320,13 +316,15 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
         case 'pdf':
           final path = await receipts.savePdf(details, settings);
           if (path != null && mounted) Toast.success(context, 'Saved $path');
+        case 'preview':
+          await showReceiptPreview(context, ref, details);
         case 'view':
           await showDialog<void>(
             context: context,
             builder: (context) => _SaleDetailsDialog(
               details: details,
               money: ref.read(moneyFormatterProvider),
-              onPrint: () => receipts.printReceipt(details, settings),
+              onPrint: () => showReceiptPreview(context, ref, details),
             ),
           );
       }
@@ -438,6 +436,13 @@ class _SaleRow extends StatelessWidget {
                   child: ListTile(
                     leading: Icon(Icons.visibility_outlined),
                     title: Text('View details'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'preview',
+                  child: ListTile(
+                    leading: Icon(Icons.receipt_long_outlined),
+                    title: Text('Preview receipt'),
                   ),
                 ),
                 PopupMenuItem(
@@ -561,7 +566,7 @@ class _SaleDetailsDialog extends StatelessWidget {
         FilledButton.icon(
           onPressed: onPrint,
           icon: const Icon(Icons.print_outlined),
-          label: const Text('Print receipt'),
+          label: const Text('Receipt'),
         ),
       ],
     );

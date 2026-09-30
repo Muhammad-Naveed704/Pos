@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../../core/database/database_provider.dart';
+import '../../auth/data/account_recovery_service.dart';
 import '../../auth/data/password_hasher.dart';
 import '../../auth/domain/permissions.dart';
 
@@ -75,7 +76,8 @@ class FirstRunService {
     return ownerCount == 0;
   }
 
-  Future<void> complete(FirstRunInput input) async {
+  /// Completes setup and returns the one-time account recovery key.
+  Future<String> complete(FirstRunInput input) async {
     if (!await isSetupRequired()) {
       throw StateError('First-run setup has already been completed.');
     }
@@ -88,6 +90,7 @@ class FirstRunService {
     final storeId = _uuid.v4();
     final ownerRoleId = _uuid.v4();
 
+    late String recoveryKey;
     await _database.transaction(() async {
       await _database
           .into(_database.stores)
@@ -197,6 +200,11 @@ class FirstRunService {
               createdAt: now,
             ),
           );
+      recoveryKey = await AccountRecoveryService(
+        _database,
+        _passwordHasher,
+      ).storeNewKey(userId: userId, storeId: storeId);
     });
+    return recoveryKey;
   }
 }

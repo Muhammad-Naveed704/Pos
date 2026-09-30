@@ -172,10 +172,17 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     final email = TextEditingController(text: customer?.email ?? '');
     final address = TextEditingController(text: customer?.address ?? '');
     final notes = TextEditingController(text: customer?.notes ?? '');
-    final credit = TextEditingController(text: '${customer?.creditLimit ?? 0}');
-    final opening = TextEditingController(
-      text: '${customer?.openingBalance ?? 0}',
-    );
+    final money = ref.read(moneyFormatterProvider);
+    String n(double? value) {
+      if (value == null || value == 0) return '';
+      final text = value == value.roundToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toString();
+      return money.decimalSeparator == ',' ? text.replaceAll('.', ',') : text;
+    }
+
+    final credit = TextEditingController(text: n(customer?.creditLimit));
+    final opening = TextEditingController(text: n(customer?.openingBalance));
     var active = customer?.isActive ?? true;
     final saved = await showDialog<bool>(
       context: context,

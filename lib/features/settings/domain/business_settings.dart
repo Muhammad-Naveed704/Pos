@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import '../../../core/money/currency.dart';
 import '../../../core/money/money_format.dart';
 import '../../pos/domain/pos_cart.dart';
+import 'receipt_layout.dart';
+
+export 'receipt_layout.dart';
 
 /// Business-wide configuration persisted in `app_settings` (global scope).
 @immutable
@@ -22,6 +25,7 @@ class BusinessSettings {
     this.maxDiscountPercent = 100,
     this.allowPriceOverride = true,
     this.quickCashDenominations = const [100, 500, 1000, 5000],
+    this.receipt = const ReceiptLayout(),
   });
 
   static const keyBusinessName = 'business.name';
@@ -53,6 +57,7 @@ class BusinessSettings {
   final double maxDiscountPercent;
   final bool allowPriceOverride;
   final List<int> quickCashDenominations;
+  final ReceiptLayout receipt;
 
   CurrencyInfo get currency => Currencies.byCode(currencyCode);
 
@@ -101,6 +106,7 @@ class BusinessSettings {
       quickCashDenominations: denominations.isEmpty
           ? defaults.quickCashDenominations
           : denominations,
+      receipt: ReceiptLayout.fromMap(map),
     );
   }
 
@@ -119,6 +125,7 @@ class BusinessSettings {
     keyMaxDiscount: maxDiscountPercent.toStringAsFixed(2),
     keyAllowOverride: '$allowPriceOverride',
     keyQuickCash: quickCashDenominations.join(','),
+    ...receipt.toMap(),
   };
 
   BusinessSettings copyWith({
@@ -136,6 +143,7 @@ class BusinessSettings {
     double? maxDiscountPercent,
     bool? allowPriceOverride,
     List<int>? quickCashDenominations,
+    ReceiptLayout? receipt,
   }) => BusinessSettings(
     businessName: businessName ?? this.businessName,
     currencyCode: currencyCode ?? this.currencyCode,
@@ -152,6 +160,7 @@ class BusinessSettings {
     allowPriceOverride: allowPriceOverride ?? this.allowPriceOverride,
     quickCashDenominations:
         quickCashDenominations ?? this.quickCashDenominations,
+    receipt: receipt ?? this.receipt,
   );
 }
 

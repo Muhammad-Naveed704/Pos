@@ -5,6 +5,7 @@ import '../../../core/money/currency.dart';
 import '../../../core/money/money_format.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../settings/domain/business_settings.dart';
+import '../../auth/presentation/recovery_dialogs.dart';
 import '../data/first_run_service.dart';
 
 class SetupWizard extends ConsumerStatefulWidget {
@@ -129,7 +130,7 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
       _error = null;
     });
     try {
-      await ref
+      final recoveryKey = await ref
           .read(firstRunServiceProvider)
           .complete(
             FirstRunInput(
@@ -149,6 +150,7 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
               receiptFooter: _footer.text,
             ),
           );
+      if (mounted) await showRecoveryKeyDialog(context, recoveryKey);
       ref.invalidate(setupRequiredProvider);
     } catch (error) {
       if (mounted) setState(() => _error = friendlyError(error));
@@ -430,6 +432,7 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
       3 => _Fields(
         children: [
           DropdownButtonFormField<String>(
+            menuMaxHeight: 360,
             initialValue: _currency,
             isExpanded: true,
             decoration: const InputDecoration(
@@ -449,6 +452,7 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
                 setState(() => _currency = value ?? _currency),
           ),
           DropdownButtonFormField<NumberStyle>(
+            menuMaxHeight: 360,
             initialValue: _numberStyle,
             isExpanded: true,
             decoration: const InputDecoration(
@@ -466,6 +470,7 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
                 setState(() => _numberStyle = value ?? _numberStyle),
           ),
           DropdownButtonFormField<String>(
+            menuMaxHeight: 360,
             initialValue: _timezone,
             isExpanded: true,
             decoration: const InputDecoration(

@@ -5,6 +5,7 @@ import '../../../core/ui/ui_kit.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../application/session_controller.dart';
 import '../domain/app_session.dart';
+import 'recovery_dialogs.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({this.lockedSession, super.key});
@@ -230,6 +231,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         validator: (value) => value == null || value.isEmpty
                             ? 'Enter your password.'
                             : null,
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _busy
+                              ? null
+                              : () => showForgotPasswordDialog(
+                                  context,
+                                  username:
+                                      locked?.user.username ??
+                                      _username.text.trim(),
+                                ),
+                          child: const Text('Forgot password?'),
+                        ),
                       ),
                       AnimatedSize(
                         duration: context.tokens.motion(160),

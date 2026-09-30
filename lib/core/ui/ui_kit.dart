@@ -597,3 +597,52 @@ class _PromptDialogState extends State<_PromptDialog> {
     ],
   );
 }
+
+/// Date-range picker sized as a dialog on desktop (the Material default is
+/// full screen).
+Future<DateTimeRange?> pickDateRange(
+  BuildContext context, {
+  DateTimeRange? initial,
+  DateTime? firstDate,
+  DateTime? lastDate,
+}) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  return showDateRangePicker(
+    context: context,
+    firstDate: firstDate ?? DateTime(2020),
+    lastDate: lastDate ?? today,
+    initialDateRange: initial,
+    builder: (context, child) => Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 620),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppTokens.of(context).radius + 8),
+          child: child,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Single date picker sized for desktop.
+Future<DateTime?> pickDate(
+  BuildContext context, {
+  DateTime? initial,
+  DateTime? firstDate,
+  DateTime? lastDate,
+}) {
+  final now = DateTime.now();
+  return showDatePicker(
+    context: context,
+    initialDate: initial ?? now,
+    firstDate: firstDate ?? DateTime(2020),
+    lastDate: lastDate ?? DateTime(now.year + 5),
+    builder: (context, child) => Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+        child: child,
+      ),
+    ),
+  );
+}
