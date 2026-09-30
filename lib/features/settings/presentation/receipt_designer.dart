@@ -282,7 +282,6 @@ class _ReceiptDesignerState extends ConsumerState<ReceiptDesigner>
                     child: _preview == null
                         ? const SizedBox.shrink()
                         : ReceiptPdfView(
-                            key: ValueKey(_preview),
                             bytes: _preview!,
                             paper: _layout.paper,
                           ),

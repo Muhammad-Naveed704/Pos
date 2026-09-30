@@ -480,6 +480,13 @@ fallback) is loaded from the Windows fonts folder so Unicode currency symbols
 print; without it the ISO code is used. Printer choice and direct printing are
 per-PC SharedPreferences, not business settings.
 
+Previews use `ReceiptPdfView`, not `PdfPreview`. On Windows, PDF rasterising
+runs on the UI thread (~0.3–0.6 s for A4), and `PdfPreview` re-rasterises
+whenever its `build` callback changes identity, i.e. on every parent rebuild
+when given an inline closure. That froze the receipt designer ("Not
+Responding"). `ReceiptPdfView` renders only when its `bytes` future changes
+and keeps the previous image visible meanwhile.
+
 ## Tests and last verified state
 
 Tests use an in-memory Drift database and `StoreFlowFixture`; no production data is

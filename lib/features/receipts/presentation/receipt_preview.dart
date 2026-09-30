@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,38 +12,153 @@ import '../../settings/domain/business_settings.dart';
 import '../data/receipt_service.dart';
 
 /// Renders PDF bytes as page images, sized for desktop dialogs.
-class ReceiptPdfView extends StatelessWidget {
+///
+/// Rasterising runs on the platform (UI) thread on Windows, so it happens only
+/// when [bytes] changes (not on every rebuild, which `PdfPreview` does when
+/// given a new callback). The previous render stays visible while the next
+/// one is prepared.
+class ReceiptPdfView extends StatefulWidget {
   const ReceiptPdfView({required this.bytes, required this.paper, super.key});
 
   final Future<Uint8List> bytes;
   final ReceiptPaper paper;
 
   @override
-  Widget build(BuildContext context) => PdfPreview(
-    build: (_) => bytes,
-    useActions: false,
-    allowPrinting: false,
-    allowSharing: false,
-    canChangePageFormat: false,
-    canChangeOrientation: false,
-    canDebug: false,
-    maxPageWidth: paper.isRoll
-        ? (paper == ReceiptPaper.roll58 ? 260 : 340)
-        : 620,
-    scrollViewDecoration: BoxDecoration(
+  State<ReceiptPdfView> createState() => _ReceiptPdfViewState();
+}
+
+class _ReceiptPdfViewState extends State<ReceiptPdfView> {
+  List<ui.Image> _pages = const [];
+  Future<Uint8List>? _rendering;
+  bool _busy = false;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _render();
+  }
+
+  @override
+  void didUpdateWidget(covariant ReceiptPdfView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bytes, widget.bytes)) _render();
+  }
+
+  @override
+  void dispose() {
+    _rendering = null;
+    for (final page in _pages) {
+      page.dispose();
+    }
+    super.dispose();
+  }
+
+  double get _dpi => widget.paper.isRoll ? 144 : 110;
+
+  Future<void> _render() async {
+    final source = widget.bytes;
+    _rendering = source;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final images = <ui.Image>[];
+    try {
+      final data = await source;
+      await for (final page in Printing.raster(data, dpi: _dpi)) {
+        if (!identical(_rendering, source)) break;
+        images.add(await page.toImage());
+      }
+    } catch (error) {
+      if (mounted && identical(_rendering, source)) {
+        setState(() {
+          _error = error;
+          _busy = false;
+        });
+      }
+      for (final image in images) {
+        image.dispose();
+      }
+      return;
+    }
+    // A newer render started (or the widget closed): discard this one.
+    if (!mounted || !identical(_rendering, source)) {
+      for (final image in images) {
+        image.dispose();
+      }
+      return;
+    }
+    final old = _pages;
+    setState(() {
+      _pages = images;
+      _busy = false;
+    });
+    for (final image in old) {
+      image.dispose();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxWidth = widget.paper.isRoll
+        ? (widget.paper == ReceiptPaper.roll58 ? 260.0 : 340.0)
+        : 620.0;
+    if (_error != null && _pages.isEmpty) {
+      return EmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'Receipt could not be rendered',
+        message: friendlyError(_error!),
+      );
+    }
+    return ColoredBox(
       color: context.colors.surfaceContainerHighest,
-    ),
-    pdfPreviewPageDecoration: const BoxDecoration(
-      color: Colors.white,
-      boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)],
-    ),
-    loadingWidget: const Center(child: CircularProgressIndicator()),
-    onError: (context, error) => EmptyState(
-      icon: Icons.error_outline_rounded,
-      title: 'Receipt could not be rendered',
-      message: friendlyError(error),
-    ),
-  );
+      child: Stack(
+        children: [
+          if (_pages.isEmpty)
+            const Center(child: CircularProgressIndicator())
+          else
+            Scrollbar(
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  for (final page in _pages)
+                    Center(
+                      child: Container(
+                        constraints: BoxConstraints(maxWidth: maxWidth),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          boxShadow: [
+                            BoxShadow(color: Colors.black26, blurRadius: 8),
+                          ],
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: page.width / page.height,
+                          child: RawImage(
+                            image: page,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.medium,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (_busy && _pages.isNotEmpty)
+            const Positioned(
+              top: 10,
+              right: 12,
+              child: SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Preview a saved sale's receipt with print / save actions.
