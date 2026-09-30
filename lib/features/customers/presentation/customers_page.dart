@@ -7,6 +7,8 @@ import '../../auth/domain/permissions.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../auth/application/session_controller.dart';
+import '../../../core/ui/import_dialog.dart';
+import '../data/customer_import_service.dart';
 import '../data/customer_repository.dart';
 
 class CustomersPage extends ConsumerStatefulWidget {
@@ -16,6 +18,51 @@ class CustomersPage extends ConsumerStatefulWidget {
 }
 
 class _CustomersPageState extends ConsumerState<CustomersPage> {
+  Future<void> _import(BuildContext context) async {
+    final service = ref.read(customerImportServiceProvider);
+    final session = ref.read(activeSessionProvider)!;
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ImportDialog<CustomerImportPlan>(
+        title: 'Import customers',
+        subject: 'customers',
+        templateFileName: 'storeflow-customers-template.csv',
+        template: CustomerImportService.template,
+        aliases: CustomerImportService.aliases,
+        columnsHelp: const [
+          ('name', 'Required.'),
+          ('phone', 'Optional. Used to match existing customers.'),
+          ('email', 'Optional.'),
+          ('address', 'Optional.'),
+          ('notes', 'Optional.'),
+          ('credit_limit', 'Optional amount.'),
+          ('opening_balance', 'Optional amount.'),
+          ('loyalty_points', 'Optional whole number.'),
+          ('active', 'Optional yes/no.'),
+        ],
+        prepare: (table, update) =>
+            service.prepare(session, table, updateExisting: update),
+        previewOf: (plan) => plan.preview,
+        apply: (plan) => service.apply(session, plan),
+      ),
+    );
+  }
+
+  Future<void> _export(BuildContext context) async {
+    try {
+      final rows = await ref
+          .read(customerImportServiceProvider)
+          .export(ref.read(activeSessionProvider)!);
+      final path = await saveCsvFile(rows, fileName: 'storeflow-customers.csv');
+      if (path != null && context.mounted) {
+        Toast.success(context, '${rows.length - 1} customers exported.');
+      }
+    } catch (error) {
+      if (context.mounted) Toast.error(context, error);
+    }
+  }
+
   String _search = '';
   @override
   Widget build(BuildContext context) {
@@ -29,6 +76,17 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
             title: 'Customers',
             subtitle: 'Profiles, loyalty and purchase summaries.',
             actions: [
+              DataMenu(
+                canImport: ref
+                    .watch(activeSessionProvider)!
+                    .can(Permissions.customersCreate),
+                onImport: () => _import(context),
+                onTemplate: () => saveCsvFile(
+                  CustomerImportService.template(),
+                  fileName: 'storeflow-customers-template.csv',
+                ),
+                onExport: () => _export(context),
+              ),
               if (ref
                   .watch(activeSessionProvider)!
                   .can(Permissions.customersCreate))

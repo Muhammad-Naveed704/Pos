@@ -8,6 +8,8 @@ import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
 import '../../settings/data/business_settings_repository.dart';
+import '../../../core/ui/import_dialog.dart';
+import '../data/product_import_service.dart';
 import '../data/product_repository.dart';
 
 class ProductsPage extends ConsumerStatefulWidget {
@@ -58,6 +60,17 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           subtitle:
               'Store-aware catalog, pricing and stock for ${ref.watch(activeSessionProvider)!.store.name}.',
           actions: [
+            DataMenu(
+              canImport: ref
+                  .watch(activeSessionProvider)!
+                  .can(Permissions.productsImport),
+              onImport: () => _import(context),
+              onTemplate: () => saveCsvFile(
+                ProductImportService.template(),
+                fileName: 'storeflow-products-template.csv',
+              ),
+              onExport: () => _export(context),
+            ),
             if (ref
                 .watch(activeSessionProvider)!
                 .can(Permissions.productsCreate))
@@ -245,6 +258,62 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       ],
     ),
   );
+
+  Future<void> _import(BuildContext context) async {
+    final service = ref.read(productImportServiceProvider);
+    final session = ref.read(activeSessionProvider)!;
+    final changed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ImportDialog<ProductImportPlan>(
+        title: 'Import products',
+        subject: 'products',
+        templateFileName: 'storeflow-products-template.csv',
+        template: ProductImportService.template,
+        aliases: ProductImportService.aliases,
+        columnsHelp: const [
+          ('sku', 'Required. Unique product code; matches existing products.'),
+          ('name', 'Required.'),
+          ('sale_price', 'Required. Selling price.'),
+          ('barcode', 'Optional, must be unique.'),
+          (
+            'category',
+            'Optional. Missing categories are created. Use Parent > Child.',
+          ),
+          ('cost_price', 'Optional.'),
+          (
+            'stock',
+            'Optional. Stock in the current store (records a stock movement).',
+          ),
+          ('tax_rate', 'Optional percent 0-100.'),
+          ('discount', 'Optional percent 0-100.'),
+          ('unit', 'Optional, e.g. each, kg, box.'),
+          ('reorder_level', 'Optional.'),
+          ('track_stock', 'Optional yes/no.'),
+          ('active', 'Optional yes/no.'),
+        ],
+        prepare: (table, update) =>
+            service.prepare(session, table, updateExisting: update),
+        previewOf: (plan) => plan.preview,
+        apply: (plan) => service.apply(session, plan),
+      ),
+    );
+    if (changed == true) _reload();
+  }
+
+  Future<void> _export(BuildContext context) async {
+    try {
+      final rows = await ref
+          .read(productImportServiceProvider)
+          .export(ref.read(activeSessionProvider)!);
+      final path = await saveCsvFile(rows, fileName: 'storeflow-products.csv');
+      if (path != null && context.mounted) {
+        Toast.success(context, '${rows.length - 1} products exported.');
+      }
+    } catch (error) {
+      if (context.mounted) Toast.error(context, error);
+    }
+  }
 
   Future<void> _action(
     BuildContext context,
