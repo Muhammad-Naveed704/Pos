@@ -46,12 +46,13 @@ implemented. The current usable scope is:
 - Reports: sales summary, daily, products (profit), categories, cashiers,
   payment methods, purchases, stock valuation; CSV and PDF export
 - Offline password recovery key, change own password
+- Sale returns/refunds (partial or full, per-line restock choice, cash/card/
+  bank/other) and same-day voids, with refund slips
 - USB barcode scanner capture on the POS even when search is not focused
 
 Not implemented yet (do not describe as done):
 
 - Backup/restore workflow
-- Sale void/refund workflow (permissions exist, no UI/service)
 - Customer credit sales and supplier payables/balances
 - UI translations (all text is English)
 
@@ -196,9 +197,9 @@ The connection enables:
 - 5-second busy timeout
 - Drift/sqlite3 prepared-statement reuse
 
-Current schema version: **3**.
+Current schema version: **4**.
 
-The 21 tables are:
+The 23 tables are:
 
 1. `stores`
 2. `roles`
@@ -221,13 +222,16 @@ The 21 tables are:
 19. `held_carts`
 20. `invoice_sequences`
 21. `backup_records`
+22. `sale_refunds`
+23. `sale_refund_items`
 
 Version 1 created all tables and the base lookup/history indexes. Version 2 adds
 non-destructive indexes for scoped settings, users/store status, category trees,
 exact barcode/SKU lookup, held carts, and payment methods. Version 3 adds
 `sale_items.unit_cost` (cost snapshot at sale time, backfilled from the current
 product cost for older sales) and indexes for stock ledgers, purchases, cash
-sessions and sale-item product lookups.
+sessions and sale-item product lookups. Version 4 adds `sale_refunds` and
+`sale_refund_items` with their indexes.
 
 **Dates are stored as unix seconds.** Drift's default DateTime storage is an
 INTEGER, so SQL date functions must use the `'unixepoch'` modifier, e.g.
@@ -381,6 +385,7 @@ Do not ship seed/demo records in this path. Test fixtures may create isolated da
 - `PurchaseService`: suppliers, receiving, supplier returns
 - `CashbookService`: drawer sessions, pay-ins/outs, closing count
 - `ReportsService`: date-ranged reports returning a uniform `ReportResult`
+- `RefundService`: sale returns/refunds, voids, refund history
 
 ## POS behavior
 
@@ -410,7 +415,8 @@ Keyboard bindings:
 - F9 — held sales (resuming parks the current cart instead of discarding it)
 - F10 / Ctrl+Enter — open/complete payment depending focus
 - Enter on an empty search field — open payment
-- P on the sale-complete dialog — print receipt
+- P on the sale-complete dialog — print receipt; V — preview
+- Ctrl+R — return items (scan the receipt barcode or type the invoice)
 - Ctrl+N — confirmed new/clear sale
 - Ctrl+B — collapse/expand sidebar; Ctrl+L — lock
 - Escape — standard dialog/back behavior
@@ -428,6 +434,28 @@ dialogs or on the lock screen. Camera scanning is not supported on Windows.
 
 Cash sales are attached to the cashier's open cash session (if any) inside the
 checkout transaction.
+
+## Returns, refunds and voids
+
+`RefundService` is the only write path for returns. Sale statuses are
+`completed`, `partially_refunded`, `refunded` and `voided`.
+
+- Refund: `pos.refund`; any number of partial refunds until every unit is
+  returned. A line's refund value is its line total share times
+  `grand_total / sum(line_total)`, so sale-level discounts are spread; the
+  refund that returns everything settles the exact remaining balance. Each
+  line chooses whether it goes back to stock (movement type `refund`).
+- Void: `pos.void_sale`; only same-day sales with no refunds. Restocks every
+  tracked line (movement type `void`) and marks the sale `voided`.
+- Cash refunds/voids insert a `cash_refund` cash transaction on the user's open
+  drawer session and are blocked when the drawer holds less. Loyalty points are
+  reversed as `floor(amount)` (checkout awards `floor(grand_total)`).
+- Everything for one refund/void happens in one transaction with an audit row.
+
+Reporting rule: sales count when `sale_status <> 'voided'` (by sale date);
+refunds of kind `refund` are subtracted on their own date (value, tax share,
+and cost only for restocked units). Voids are not subtracted separately because
+the voided sale is already excluded. Use the same rule for any new aggregate.
 
 ## Atomic checkout invariant
 
@@ -509,6 +537,8 @@ used. Current coverage includes:
 - Roles, permission escalation guard and permission upgrade
 - Inventory adjustments/counts/transfers, purchases, cashbook sessions
 - Reports and dashboard figures (unix-epoch date regression), v2→v3 migration
+- Refunds (partial/full, discount spreading, restock choice, drawer limit,
+  loyalty), voids, refund-aware reports/dashboard, v4 migration
 - Business settings load, permission denial, persistence, audit and fallbacks
 - Gate text-input regression (edit/delete/retype on login and setup) and
   legacy theme-preference migration
@@ -518,7 +548,7 @@ Last verified before this handoff:
 
 - `dart format .` — clean
 - `flutter analyze` — zero issues
-- `flutter test` — 63 tests passed
+- `flutter test` — 69 tests passed
 - Windows release build — passed at the current root
 
 Always repeat format, analyze, tests, and release build after material changes.
@@ -527,11 +557,10 @@ Always repeat format, analyze, tests, and release build after material changes.
 
 The intended next phases are:
 
-1. Void/refund flows with compensating stock/cash/audit transactions
-2. Customer credit sales and supplier payables
-3. Checksum-verified backup/restore with safety snapshots
-4. UI translations (Urdu/Arabic with RTL)
-5. Release packaging, accessibility/profile hardening, then MSIX/signing
+1. Customer credit sales and supplier payables
+2. Checksum-verified backup/restore with safety snapshots
+3. UI translations (Urdu/Arabic with RTL)
+4. Release packaging, accessibility/profile hardening, then MSIX/signing
 
 Do not begin several phases in one unreviewable change. Build vertical slices with
 domain rules, service transaction, repository queries, desktop UI, and tests.
@@ -546,6 +575,8 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
 - Do not issue cross-store queries without an explicit reason and test.
 - Do not update stock without a stock movement in the same transaction.
 - Do not split checkout/void/refund/purchase multi-table writes across transactions.
+- Never filter "real" sales with `sale_status = 'completed'`; use
+  `sale_status <> 'voided'` and subtract refunds (see Returns section).
 - Do not use raw `double` arithmetic for new financial domain logic.
 - Do not block the UI isolate with large PDF/CSV/report/image work.
 - Preserve desktop density and verify 1280×720 overflow behavior.

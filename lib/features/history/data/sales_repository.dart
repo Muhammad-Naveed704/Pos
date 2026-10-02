@@ -94,6 +94,7 @@ class SalesRepository {
     String? cashierId,
     String? paymentMethod,
     String? status,
+    String? saleId,
     DateTime? from,
     DateTime? to,
     int limit = 100,
@@ -113,6 +114,10 @@ class SalesRepository {
     if (cashierId != null) {
       filters.add('s.user_id = ?');
       variables.add(Variable.withString(cashierId));
+    }
+    if (saleId != null) {
+      filters.add('s.id = ?');
+      variables.add(Variable.withString(saleId));
     }
     if (status != null) {
       filters.add('s.sale_status = ?');
@@ -169,10 +174,11 @@ class SalesRepository {
   }
 
   Future<SaleDetails> details(AppSession session, String saleId) async {
-    final summary = (await search(session: session, limit: 500)).firstWhere(
-      (item) => item.sale.id == saleId,
-      orElse: () => throw StateError('Sale not found in the active store.'),
-    );
+    final matches = await search(session: session, saleId: saleId, limit: 1);
+    if (matches.isEmpty) {
+      throw StateError('Sale not found in the active store.');
+    }
+    final summary = matches.single;
     final store = await (_database.select(
       _database.stores,
     )..where((row) => row.id.equals(summary.sale.storeId))).getSingle();

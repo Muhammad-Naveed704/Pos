@@ -65,22 +65,26 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
         '''
     SELECT
       COALESCE((SELECT SUM(grand_total) FROM sales
-        WHERE store_id = ?1 AND sale_status = 'completed' AND $today), 0.0) AS sales,
+        WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS sales,
       COALESCE((SELECT SUM(grand_total) FROM sales
-        WHERE store_id = ?1 AND sale_status = 'completed'
+        WHERE store_id = ?1 AND sale_status <> 'voided'
           AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime', '-1 day')), 0.0) AS yesterday,
       (SELECT COUNT(*) FROM sales
-        WHERE store_id = ?1 AND sale_status = 'completed' AND $today) AS invoices,
+        WHERE store_id = ?1 AND sale_status <> 'voided' AND $today) AS invoices,
       (SELECT COUNT(*) FROM customers WHERE is_active = 1) AS customers,
       COALESCE((SELECT SUM(discount_amount) FROM sales
-        WHERE store_id = ?1 AND sale_status = 'completed' AND $today), 0.0) AS discounts,
+        WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS discounts,
       -- Net cash in the drawer: cash tendered minus change handed back.
       COALESCE((SELECT SUM(payments.amount) FROM payments
         JOIN sales ps ON ps.id = payments.sale_id
-        WHERE ps.store_id = ?1 AND ps.sale_status = 'completed' AND payments.method = 'cash'
+        WHERE ps.store_id = ?1 AND ps.sale_status <> 'voided' AND payments.method = 'cash'
           AND date(payments.created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0)
       - COALESCE((SELECT SUM(change_amount) FROM sales
-        WHERE store_id = ?1 AND sale_status = 'completed' AND $today), 0.0) AS cash_collected,
+        WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS cash_collected,
+      COALESCE((SELECT SUM(amount) FROM sale_refunds
+        WHERE store_id = ?1 AND kind = 'refund' AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0) AS refunds,
+      COALESCE((SELECT SUM(amount) FROM sale_refunds
+        WHERE store_id = ?1 AND kind = 'refund' AND method = 'cash' AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0) AS cash_refunds,
       (SELECT COUNT(*) FROM product_stores
         WHERE store_id = ?1 AND is_available = 1 AND stock_qty > 0 AND stock_qty <= reorder_level) AS low_stock,
       (SELECT COUNT(*) FROM product_stores
@@ -96,7 +100,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
     SELECT CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
            SUM(grand_total) AS total
     FROM sales
-    WHERE store_id = ?1 AND sale_status = 'completed' AND $today
+    WHERE store_id = ?1 AND sale_status <> 'voided' AND $today
     GROUP BY hour
   ''',
         variables: [store],
@@ -112,7 +116,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
         '''
     SELECT date(created_at, 'unixepoch', 'localtime') AS day, SUM(grand_total) AS total
     FROM sales
-    WHERE store_id = ?1 AND sale_status = 'completed'
+    WHERE store_id = ?1 AND sale_status <> 'voided'
       AND date(created_at, 'unixepoch', 'localtime') >= date('now', 'localtime', '-6 day')
     GROUP BY day
   ''',
@@ -142,7 +146,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
            SUM(si.line_total) AS revenue
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
-    WHERE s.store_id = ?1 AND s.sale_status = 'completed'
+    WHERE s.store_id = ?1 AND s.sale_status <> 'voided'
       AND date(s.created_at, 'unixepoch', 'localtime') >= date('now', 'localtime', '-6 day')
     GROUP BY si.product_id, si.product_name_snapshot
     ORDER BY revenue DESC
@@ -158,7 +162,7 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
     SELECT p.method AS method, SUM(p.amount) AS total
     FROM payments p
     JOIN sales s ON s.id = p.sale_id
-    WHERE s.store_id = ?1 AND s.sale_status = 'completed'
+    WHERE s.store_id = ?1 AND s.sale_status <> 'voided'
       AND date(p.created_at, 'unixepoch', 'localtime') = date('now', 'localtime')
     GROUP BY p.method
   ''',
@@ -167,12 +171,13 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
       .get();
 
   return DashboardMetrics(
-    sales: row.read<double>('sales'),
+    sales: row.read<double>('sales') - row.read<double>('refunds'),
     yesterdaySales: row.read<double>('yesterday'),
     invoices: row.read<int>('invoices'),
     customers: row.read<int>('customers'),
     discounts: row.read<double>('discounts'),
-    cashCollected: row.read<double>('cash_collected'),
+    cashCollected:
+        row.read<double>('cash_collected') - row.read<double>('cash_refunds'),
     lowStock: row.read<int>('low_stock'),
     outOfStock: row.read<int>('out_of_stock'),
     hourly: hourly,

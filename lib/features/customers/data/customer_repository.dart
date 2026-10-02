@@ -106,7 +106,7 @@ class CustomerRepository {
         .customSelect(
           '''SELECT COALESCE(SUM(grand_total), 0.0) AS total_spend,
          MAX(created_at) AS last_purchase FROM sales
-         WHERE customer_id = ? AND sale_status = 'completed' ''',
+         WHERE customer_id = ? AND sale_status <> 'voided' ''',
           variables: [Variable.withString(customerId)],
         )
         .getSingle();

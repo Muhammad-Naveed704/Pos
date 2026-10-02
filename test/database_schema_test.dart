@@ -15,7 +15,7 @@ void main() {
   tearDown(() => database.close());
 
   test('migration creates the complete current schema', () async {
-    expect(database.schemaVersion, 3);
+    expect(database.schemaVersion, 4);
     final rows = await database
         .customSelect(
           "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -98,6 +98,8 @@ void main() {
       await migrationDatabase.customStatement(
         'ALTER TABLE sale_items DROP COLUMN unit_cost',
       );
+      await migrationDatabase.customStatement('DROP TABLE sale_refund_items');
+      await migrationDatabase.customStatement('DROP TABLE sale_refunds');
       await migrationDatabase.customStatement('PRAGMA user_version = 1');
       await migrationDatabase.close();
       migrationDatabase = null;
@@ -115,7 +117,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 3);
+      expect(version.read<int>('user_version'), 4);
     } finally {
       await migrationDatabase?.close();
       if (directory.existsSync()) directory.deleteSync(recursive: true);
@@ -205,6 +207,8 @@ void main() {
           "INSERT INTO sale_items (id, sale_id, product_id, product_name_snapshot, sku_snapshot, qty, unit_price, discount_amount, tax_amount, line_total) "
           "VALUES ('i1', 'sale1', 'p1', 'Kettle', 'P1', 1, 900, 0, 0, 900)",
         );
+        await db.customStatement('DROP TABLE sale_refund_items');
+        await db.customStatement('DROP TABLE sale_refunds');
         await db.customStatement('PRAGMA user_version = 2');
         await db.close();
         db = null;
@@ -220,13 +224,15 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .getSingle();
-        expect(version.read<int>('user_version'), 3);
+        expect(version.read<int>('user_version'), 4);
         final index = await upgraded
             .customSelect(
               "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_stock_store_created'",
             )
             .get();
         expect(index, hasLength(1));
+        // v4: refund tables exist and are usable.
+        expect(await upgraded.select(upgraded.saleRefunds).get(), isEmpty);
       } finally {
         await db?.close();
         if (directory.existsSync()) directory.deleteSync(recursive: true);

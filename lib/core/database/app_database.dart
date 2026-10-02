@@ -177,6 +177,41 @@ class SaleItems extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+/// A refund or void against a sale (schema v4).
+class SaleRefunds extends Table {
+  TextColumn get id => text()();
+  TextColumn get saleId => text().references(Sales, #id)();
+  TextColumn get storeId => text().references(Stores, #id)();
+  TextColumn get userId => text().references(Users, #id)();
+  TextColumn get number => text().unique()();
+
+  /// `refund` (items returned) or `void` (whole sale cancelled).
+  TextColumn get kind => text()();
+  TextColumn get method => text()();
+  RealColumn get amount => real()();
+  TextColumn get reason => text().withDefault(const Constant(''))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class SaleRefundItems extends Table {
+  TextColumn get id => text()();
+  TextColumn get refundId => text().references(SaleRefunds, #id)();
+  TextColumn get saleItemId => text().references(SaleItems, #id)();
+  TextColumn get productId => text().references(Products, #id)();
+  RealColumn get qty => real()();
+  RealColumn get amount => real()();
+
+  /// Cost of the returned units (from the sale snapshot).
+  RealColumn get cost => real().withDefault(const Constant(0))();
+  BoolColumn get restocked => boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 class Payments extends Table {
   TextColumn get id => text()();
   TextColumn get saleId => text().references(Sales, #id)();
@@ -352,13 +387,15 @@ class BackupRecords extends Table {
     HeldCarts,
     InvoiceSequences,
     BackupRecords,
+    SaleRefunds,
+    SaleRefundItems,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -367,6 +404,7 @@ class AppDatabase extends _$AppDatabase {
       await _createIndexes();
       await _createPhaseTwoIndexes();
       await _createPhaseThreeIndexes();
+      await _createPhaseFourIndexes();
     },
     onUpgrade: (migrator, from, to) async {
       if (from < 2) {
@@ -381,6 +419,11 @@ class AppDatabase extends _$AppDatabase {
           '(SELECT cost_price FROM products WHERE products.id = sale_items.product_id), 0)',
         );
         await _createPhaseThreeIndexes();
+      }
+      if (from < 4) {
+        await migrator.createTable(saleRefunds);
+        await migrator.createTable(saleRefundItems);
+        await _createPhaseFourIndexes();
       }
     },
     beforeOpen: (details) async {
@@ -438,6 +481,18 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_cash_sessions_store_user_status ON cash_sessions(store_id, user_id, status)',
       'CREATE INDEX IF NOT EXISTS idx_cash_transactions_session ON cash_transactions(session_id)',
       'CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id)',
+    ];
+    for (final statement in statements) {
+      await customStatement(statement);
+    }
+  }
+
+  Future<void> _createPhaseFourIndexes() async {
+    const statements = [
+      'CREATE INDEX IF NOT EXISTS idx_sale_refunds_store_created ON sale_refunds(store_id, created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_refunds_sale ON sale_refunds(sale_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_refund_items_refund ON sale_refund_items(refund_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sale_refund_items_sale_item ON sale_refund_items(sale_item_id)',
     ];
     for (final statement in statements) {
       await customStatement(statement);

@@ -22,6 +22,7 @@ import '../data/checkout_service.dart';
 import '../data/held_cart_repository.dart';
 import '../domain/pos_cart.dart';
 import '../../receipts/presentation/receipt_preview.dart';
+import '../../returns/presentation/refund_dialog.dart';
 import 'barcode_scanner.dart';
 import 'payment_dialog.dart';
 import 'pos_dialogs.dart';
@@ -176,6 +177,8 @@ class _PosPageState extends ConsumerState<PosPage> {
         const SingleActivator(LogicalKeyboardKey.f8): _quickCash,
         const SingleActivator(LogicalKeyboardKey.f9): _heldCarts,
         const SingleActivator(LogicalKeyboardKey.f10): _payment,
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true):
+            _startReturn,
       },
       child: Focus(
         focusNode: _pageFocus,
@@ -204,6 +207,9 @@ class _PosPageState extends ConsumerState<PosPage> {
                       ? _saleDiscount
                       : null,
                   onNote: _editNote,
+                  onReturn: session.can(Permissions.posRefund)
+                      ? _startReturn
+                      : null,
                   onClear: hasLines ? _newSale : null,
                   onPay: hasLines && !_busy ? _payment : null,
                   onQuickCash: hasLines && !_busy ? _quickCash : null,
@@ -452,6 +458,12 @@ class _PosPageState extends ConsumerState<PosPage> {
           percent: result.percent.clamp(0, 100).toDouble(),
         );
     _searchFocus.requestFocus();
+  }
+
+  Future<void> _startReturn() async {
+    if (!ref.read(activeSessionProvider)!.can(Permissions.posRefund)) return;
+    await startReturnByInvoice(context, ref);
+    if (mounted) _searchFocus.requestFocus();
   }
 
   Future<void> _editNote() async {
@@ -758,6 +770,7 @@ class _CartPanel extends ConsumerWidget {
     required this.onHeld,
     required this.onEditLine,
     required this.onNote,
+    this.onReturn,
     this.onHold,
     this.onDiscount,
     this.onClear,
@@ -774,6 +787,7 @@ class _CartPanel extends ConsumerWidget {
   final VoidCallback onHeld;
   final ValueChanged<int> onEditLine;
   final VoidCallback onNote;
+  final VoidCallback? onReturn;
   final VoidCallback? onHold;
   final VoidCallback? onDiscount;
   final VoidCallback? onClear;
@@ -956,6 +970,12 @@ class _CartPanel extends ConsumerWidget {
                       label: cart.notes.isEmpty ? 'Note' : 'Note ✓',
                       onTap: onNote,
                     ),
+                    if (onReturn != null)
+                      _ToolButton(
+                        icon: Icons.assignment_return_outlined,
+                        label: 'Return',
+                        onTap: onReturn,
+                      ),
                   ],
                 ),
                 const SizedBox(height: 10),

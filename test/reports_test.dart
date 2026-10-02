@@ -14,6 +14,7 @@ import 'package:storeflow_pos/features/pos/data/checkout_service.dart';
 import 'package:storeflow_pos/features/pos/domain/pos_cart.dart';
 import 'package:storeflow_pos/features/products/data/product_repository.dart';
 import 'package:storeflow_pos/features/reports/data/reports_service.dart';
+import 'package:storeflow_pos/features/returns/data/refund_service.dart';
 
 import 'support/storeflow_fixture.dart';
 
@@ -30,16 +31,22 @@ void main() {
   /// Sells 2 × item at 500 (cost 300) for 1000 cash.
   Future<void> sell() async {
     final products = ProductRepository(fixture.database);
-    final id = await products.save(
-      session: owner,
-      input: const ProductInput(
-        sku: 'LAMP',
-        name: 'Lamp',
-        salePrice: 500,
-        costPrice: 300,
-        stockQty: 10,
-      ),
+    final existing = await products.exactLookup(
+      storeId: owner.store.id,
+      code: 'LAMP',
     );
+    final id =
+        existing?.product.id ??
+        await products.save(
+          session: owner,
+          input: const ProductInput(
+            sku: 'LAMP',
+            name: 'Lamp',
+            salePrice: 500,
+            costPrice: 300,
+            stockQty: 10,
+          ),
+        );
     final product = (await products.byId(
       storeId: owner.store.id,
       productId: id,
@@ -98,21 +105,21 @@ void main() {
 
     final daily = await reports.run(owner, ReportKind.daily, today());
     expect(daily.rows, hasLength(1));
-    expect(daily.rows.single[4], 1000);
+    expect(daily.rows.single[5], 1000);
 
     final products = await reports.run(owner, ReportKind.products, today());
     final lamp = products.rows.single;
     expect(lamp[0], 'Lamp');
     expect(lamp[2], 2);
-    expect(lamp[5], 600, reason: 'cost uses the snapshot at sale time');
-    expect(lamp[6], 400);
+    expect(lamp[6], 600, reason: 'cost uses the snapshot at sale time');
+    expect(lamp[7], 400);
 
     // Changing the product cost later does not rewrite past profit.
     await fixture.database.customStatement(
       "UPDATE products SET cost_price = 450 WHERE sku = 'LAMP'",
     );
     final again = await reports.run(owner, ReportKind.products, today());
-    expect(again.rows.single[6], 400);
+    expect(again.rows.single[7], 400);
 
     final payments = await reports.run(owner, ReportKind.payments, today());
     expect(payments.rows.single[0], 'CASH');
@@ -149,5 +156,75 @@ void main() {
       isFalse,
       reason: 'profit is hidden without reports.profit',
     );
+  });
+
+  test('refunds reduce sales, profit and cash; voids drop out', () async {
+    await sell();
+    final refunds = RefundService(fixture.database);
+    final sale = await fixture.database
+        .select(fixture.database.sales)
+        .getSingle();
+    final state = await refunds.load(owner, sale.id);
+    // Return 1 of 2 lamps (500, cost 300) to stock, in cash.
+    await refunds.refund(
+      owner,
+      saleId: sale.id,
+      lines: [
+        RefundLineInput(saleItemId: state.lines.single.item.id, quantity: 1),
+      ],
+      method: 'cash',
+      reason: 'Other',
+    );
+    final reports = ReportsService(fixture.database);
+    final summary = await reports.run(owner, ReportKind.summary, today());
+    double kpi(String label) =>
+        summary.kpis.firstWhere((k) => k.label == label).value;
+    expect(kpi('Net sales'), 500);
+    expect(kpi('Refunds'), 500);
+    expect(kpi('Gross profit'), 200);
+
+    final daily = await reports.run(owner, ReportKind.daily, today());
+    expect(daily.rows.single[3], 500, reason: 'refunds column');
+    expect(daily.rows.single[5], 500, reason: 'net after refunds');
+
+    final products = await reports.run(owner, ReportKind.products, today());
+    final lamp = products.rows.single;
+    expect(lamp[2], 1, reason: 'net quantity');
+    expect(lamp[3], 1, reason: 'returned quantity');
+    expect(lamp[5], 500);
+    expect(lamp[7], 200);
+
+    final payments = await reports.run(owner, ReportKind.payments, today());
+    expect(payments.kpis.first.value, 500, reason: 'net cash after refund');
+    expect(payments.rows.last[2], -500);
+
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(fixture.database),
+        sharedPreferencesProvider.overrideWithValue(
+          await SharedPreferences.getInstance(),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(sessionControllerProvider.notifier)
+        .login('owner', 'test-password');
+    final metrics = await container.read(dashboardMetricsProvider.future);
+    expect(metrics.sales, 500);
+    expect(metrics.cashCollected, 500);
+
+    // A second sale that is voided disappears from the reports.
+    await sell();
+    final second = (await fixture.database.select(fixture.database.sales).get())
+        .firstWhere((s) => s.id != sale.id);
+    await refunds.voidSale(
+      owner,
+      saleId: second.id,
+      reason: 'Entered by mistake',
+    );
+    final after = await reports.run(owner, ReportKind.summary, today());
+    expect(after.kpis.first.value, 500);
   });
 }

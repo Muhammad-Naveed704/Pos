@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/database/app_database.dart';
 import '../../../core/money/currency.dart';
 import '../../../core/money/money_format.dart';
 import '../../../core/theme/theme_controller.dart';
@@ -130,6 +131,10 @@ class ReceiptService {
     return path;
   }
 }
+
+/// Builds any receipt-style PDF off the UI isolate.
+Future<Uint8List> buildReceiptPdfInBackground(ReceiptData data) =>
+    compute(buildReceiptPdf, data);
 
 PdfPageFormat pageFormatFor(ReceiptPaper paper) => switch (paper) {
   ReceiptPaper.roll58 => const PdfPageFormat(
@@ -253,6 +258,62 @@ class ReceiptData {
       change: sale.changeAmount,
       notes: sale.notes,
       status: sale.saleStatus,
+    );
+  }
+
+  /// Refund slip for one refund/void of a sale.
+  factory ReceiptData.fromRefund(
+    SaleDetails details,
+    SaleRefund refund,
+    List<(SaleRefundItem, String)> items,
+    BusinessSettings s,
+  ) {
+    final base = ReceiptData.fromSale(details, s);
+    final skus = {for (final i in details.items) i.id: i.skuSnapshot};
+    final amount = refund.amount;
+    return ReceiptData(
+      layout: s.receipt.copyWith(
+        title: refund.kind == 'void' ? 'VOID' : 'REFUND',
+      ),
+      businessName: base.businessName,
+      header: base.header,
+      footer: base.footer,
+      taxLabel: base.taxLabel,
+      taxNumber: base.taxNumber,
+      currencyCode: base.currencyCode,
+      currencySymbol: base.currencySymbol,
+      numberStyle: base.numberStyle,
+      symbolAfter: base.symbolAfter,
+      storeName: base.storeName,
+      address: base.address,
+      phone: base.phone,
+      invoice: refund.number,
+      createdAt: refund.createdAt,
+      cashier: base.cashier,
+      customer: base.customer,
+      items: [
+        for (final (item, name) in items)
+          ReceiptItem(
+            name: name,
+            sku: skus[item.saleItemId] ?? '',
+            quantity: item.qty,
+            unitPrice: item.qty == 0 ? 0 : item.amount / item.qty,
+            discount: 0,
+            tax: 0,
+            total: item.amount,
+          ),
+      ],
+      payments: [(method: 'refund ${refund.method}', amount: amount)],
+      subtotal: amount,
+      discount: 0,
+      tax: 0,
+      total: amount,
+      received: amount,
+      change: 0,
+      notes:
+          'Original invoice ${details.summary.sale.invoiceNumber}'
+          '${refund.reason.isEmpty ? '' : ' · ${refund.reason}'}',
+      status: 'refunded',
     );
   }
 
@@ -400,6 +461,10 @@ pw.ThemeData pdfSystemTheme() {
 /// Built-in PDF fonts only cover Latin-1 plus the euro sign.
 bool _latin1(String text) =>
     text.runes.every((rune) => rune <= 0xFF || rune == 0x20AC);
+
+String _paidLabel(String method) => method.startsWith('refund ')
+    ? 'Refunded (${method.substring(7).toUpperCase()})'
+    : 'Paid (${method.toUpperCase()})';
 
 String _quantity(double value) => value == value.roundToDouble()
     ? value.toStringAsFixed(0)
@@ -625,11 +690,7 @@ pw.Widget _rollBody(_Ctx c) {
       ),
       pw.SizedBox(height: 2),
       for (final payment in d.payments)
-        _row(
-          'Paid (${payment.method.toUpperCase()})',
-          c.money.major(payment.amount),
-          c.text,
-        ),
+        _row(_paidLabel(payment.method), c.money.major(payment.amount), c.text),
       if (d.change > 0) _row('Change', c.money.major(d.change), c.bold),
       if (d.notes.isNotEmpty) ...[
         _dashed(),
@@ -846,7 +907,7 @@ List<pw.Widget> _invoiceBody(_Ctx c) {
               ),
               for (final payment in d.payments)
                 _row(
-                  'Paid (${payment.method.toUpperCase()})',
+                  _paidLabel(payment.method),
                   c.money.major(payment.amount),
                   c.text,
                 ),

@@ -114,8 +114,71 @@ class ReportsService {
     Variable.withDateTime(to),
   ];
 
+  /// Sales that count: everything except voided ones. Refunds are subtracted
+  /// separately on the date they happened.
   static const _completed =
-      "s.store_id = ?1 AND s.sale_status = 'completed' AND s.created_at >= ?2 AND s.created_at < ?3";
+      "s.store_id = ?1 AND s.sale_status <> 'voided' AND s.created_at >= ?2 AND s.created_at < ?3";
+
+  static const _refundWhere =
+      "r.store_id = ?1 AND r.kind = 'refund' AND r.created_at >= ?2 AND r.created_at < ?3";
+
+  /// Refund value (incl. sale discount share), its tax share and the cost of
+  /// restocked units, plus count — for refunds made in the period.
+  Future<({double amount, double tax, double cost, int count})> _refundTotals(
+    AppSession session,
+    DateTime from,
+    DateTime to,
+  ) async {
+    final row = await _database.customSelect('''
+      SELECT COUNT(*) AS count,
+             COALESCE(SUM(r.amount), 0.0) AS amount,
+             COALESCE(SUM(CASE WHEN s.grand_total > 0 THEN r.amount * s.tax_amount / s.grand_total ELSE 0 END), 0.0) AS tax,
+             COALESCE((SELECT SUM(ri.cost) FROM sale_refund_items ri JOIN sale_refunds r ON r.id = ri.refund_id
+                       WHERE $_refundWhere AND ri.restocked = 1), 0.0) AS cost
+      FROM sale_refunds r JOIN sales s ON s.id = r.sale_id
+      WHERE $_refundWhere
+      ''', variables: _vars(session, from, to)).getSingle();
+    return (
+      amount: row.read<double>('amount'),
+      tax: row.read<double>('tax'),
+      cost: row.read<double>('cost'),
+      count: row.read<int>('count'),
+    );
+  }
+
+  /// Per refunded product (line basis, like the product report):
+  /// qty, value, tax share and restocked cost.
+  Future<Map<String, ({double qty, double value, double tax, double cost})>>
+  _refundsBy(
+    AppSession session,
+    DateTime from,
+    DateTime to,
+    String keySql, {
+    String joins = '',
+  }) async {
+    final rows = await _database.customSelect('''
+      SELECT $keySql AS k,
+             SUM(ri.qty) AS qty,
+             SUM(ri.qty * i.line_total / i.qty) AS value,
+             SUM(ri.qty * i.tax_amount / i.qty) AS tax,
+             SUM(CASE WHEN ri.restocked = 1 THEN ri.cost ELSE 0 END) AS cost
+      FROM sale_refund_items ri
+      JOIN sale_refunds r ON r.id = ri.refund_id
+      JOIN sale_items i ON i.id = ri.sale_item_id
+      $joins
+      WHERE $_refundWhere AND i.qty > 0
+      GROUP BY k
+      ''', variables: _vars(session, from, to)).get();
+    return {
+      for (final row in rows)
+        row.read<String>('k'): (
+          qty: row.read<double>('qty'),
+          value: row.read<double>('value'),
+          tax: row.read<double>('tax'),
+          cost: row.read<double>('cost'),
+        ),
+    };
+  }
 
   Future<ReportResult> _summary(
     AppSession session,
@@ -135,9 +198,11 @@ class ReportsService {
       FROM sales s WHERE $_completed
       ''', variables: _vars(session, from, to)).getSingle();
     final invoices = row.read<int>('invoices');
-    final net = row.read<double>('net');
-    final tax = row.read<double>('tax');
-    final cost = row.read<double>('cost');
+    final refunds = await _refundTotals(session, from, to);
+    final salesNet = row.read<double>('net');
+    final net = salesNet - refunds.amount;
+    final tax = row.read<double>('tax') - refunds.tax;
+    final cost = row.read<double>('cost') - refunds.cost;
     final revenue = net - tax;
     final grossProfit = revenue - cost;
     final daily = await _dailyRows(session, from, to);
@@ -155,7 +220,12 @@ class ReportsService {
           invoices == 0 ? 0 : net / invoices,
           ColumnKind.money,
         ),
-        ReportKpi('Discounts', row.read<double>('discounts'), ColumnKind.money),
+        ReportKpi(
+          'Refunds',
+          refunds.amount,
+          ColumnKind.money,
+          note: '${refunds.count} refund(s)',
+        ),
         ReportKpi('Tax collected', tax, ColumnKind.money),
         if (profit) ...[
           ReportKpi('Gross profit', grossProfit, ColumnKind.money),
@@ -173,7 +243,9 @@ class ReportsService {
       rows: [
         ['Gross sales (before discounts)', row.read<double>('gross')],
         ['Discounts', -row.read<double>('discounts')],
-        ['Tax', tax],
+        ['Sales after discounts', salesNet],
+        ['Refunds', -refunds.amount],
+        ['Tax (after refunds)', tax],
         ['Net sales', net],
         ['Sales excluding tax', revenue],
         if (profit) ['Cost of goods sold', -cost],
@@ -185,12 +257,9 @@ class ReportsService {
     );
   }
 
-  /// (label, invoices, net, tax, discount, cost)
-  Future<List<(String, int, double, double, double, double)>> _dailyRows(
-    AppSession session,
-    DateTime from,
-    DateTime to,
-  ) async {
+  /// (label, invoices, net after refunds, tax, discount, cost, refunds)
+  Future<List<(String, int, double, double, double, double, double)>>
+  _dailyRows(AppSession session, DateTime from, DateTime to) async {
     final rows = await _database.customSelect('''
       SELECT date(s.created_at, 'unixepoch', 'localtime') AS day,
              COUNT(*) AS invoices,
@@ -198,21 +267,46 @@ class ReportsService {
              SUM(s.tax_amount) AS tax,
              SUM(s.discount_amount) AS discount,
              COALESCE((SELECT SUM(i.qty * i.unit_cost) FROM sale_items i JOIN sales x ON x.id = i.sale_id
-               WHERE x.store_id = ?1 AND x.sale_status = 'completed'
+               WHERE x.store_id = ?1 AND x.sale_status <> 'voided'
                  AND date(x.created_at, 'unixepoch', 'localtime') = date(s.created_at, 'unixepoch', 'localtime')), 0.0) AS cost
       FROM sales s WHERE $_completed
       GROUP BY day ORDER BY day
       ''', variables: _vars(session, from, to)).get();
-    return [
-      for (final row in rows)
-        (
-          row.read<String>('day'),
-          row.read<int>('invoices'),
-          row.read<double>('net'),
+    final refundRows = await _database.customSelect('''
+      SELECT date(r.created_at, 'unixepoch', 'localtime') AS day,
+             SUM(r.amount) AS amount,
+             SUM(CASE WHEN s.grand_total > 0 THEN r.amount * s.tax_amount / s.grand_total ELSE 0 END) AS tax,
+             COALESCE(SUM((SELECT SUM(ri.cost) FROM sale_refund_items ri
+                           WHERE ri.refund_id = r.id AND ri.restocked = 1)), 0.0) AS cost
+      FROM sale_refunds r JOIN sales s ON s.id = r.sale_id
+      WHERE $_refundWhere
+      GROUP BY day
+      ''', variables: _vars(session, from, to)).get();
+    final refunds = {
+      for (final row in refundRows)
+        row.read<String>('day'): (
+          row.read<double>('amount'),
           row.read<double>('tax'),
-          row.read<double>('discount'),
           row.read<double>('cost'),
         ),
+    };
+    final sales = {for (final row in rows) row.read<String>('day'): row};
+    final days = {...sales.keys, ...refunds.keys}.toList()..sort();
+    return [
+      for (final day in days)
+        () {
+          final row = sales[day];
+          final refund = refunds[day] ?? (0.0, 0.0, 0.0);
+          return (
+            day,
+            row?.read<int>('invoices') ?? 0,
+            (row?.read<double>('net') ?? 0) - refund.$1,
+            (row?.read<double>('tax') ?? 0) - refund.$2,
+            row?.read<double>('discount') ?? 0,
+            (row?.read<double>('cost') ?? 0) - refund.$3,
+            refund.$1,
+          );
+        }(),
     ];
   }
 
@@ -229,13 +323,14 @@ class ReportsService {
         const ReportColumn('Date', ColumnKind.text, flex: 2),
         const ReportColumn('Invoices', ColumnKind.integer),
         const ReportColumn('Discounts', ColumnKind.money),
+        const ReportColumn('Refunds', ColumnKind.money),
         const ReportColumn('Tax', ColumnKind.money),
         const ReportColumn('Net sales', ColumnKind.money),
         if (profit) const ReportColumn('Gross profit', ColumnKind.money),
       ],
       rows: [
         for (final d in days)
-          [d.$1, d.$2, d.$5, d.$4, d.$3, if (profit) d.$3 - d.$4 - d.$6],
+          [d.$1, d.$2, d.$5, d.$7, d.$4, d.$3, if (profit) d.$3 - d.$4 - d.$6],
       ],
       chart: [for (final d in days) (d.$1, d.$3)],
       chartLabel: 'Net sales by day',
@@ -250,7 +345,8 @@ class ReportsService {
     bool profit,
   ) async {
     final rows = await _database.customSelect('''
-      SELECT i.product_name_snapshot AS name, i.sku_snapshot AS sku,
+      SELECT i.product_id AS product_id,
+             i.product_name_snapshot AS name, i.sku_snapshot AS sku,
              SUM(i.qty) AS qty,
              SUM(i.line_total) AS total,
              SUM(i.tax_amount) AS tax,
@@ -262,17 +358,22 @@ class ReportsService {
       ORDER BY total DESC
       LIMIT 1000
       ''', variables: _vars(session, from, to)).get();
+    final returned = await _refundsBy(session, from, to, 'i.product_id');
     final data = [
       for (final row in rows)
-        (
-          name: row.read<String>('name'),
-          sku: row.read<String>('sku'),
-          qty: row.read<double>('qty'),
-          total: row.read<double>('total'),
-          tax: row.read<double>('tax'),
-          discount: row.read<double>('discount'),
-          cost: row.read<double>('cost'),
-        ),
+        () {
+          final r = returned[row.read<String>('product_id')];
+          return (
+            name: row.read<String>('name'),
+            sku: row.read<String>('sku'),
+            qty: row.read<double>('qty') - (r?.qty ?? 0),
+            total: row.read<double>('total') - (r?.value ?? 0),
+            tax: row.read<double>('tax') - (r?.tax ?? 0),
+            discount: row.read<double>('discount'),
+            cost: row.read<double>('cost') - (r?.cost ?? 0),
+            returnedQty: r?.qty ?? 0,
+          );
+        }(),
     ];
     return ReportResult(
       kind: ReportKind.products,
@@ -287,7 +388,8 @@ class ReportsService {
       columns: [
         const ReportColumn('Product', ColumnKind.text, flex: 3),
         const ReportColumn('SKU', ColumnKind.text, flex: 2),
-        const ReportColumn('Qty', ColumnKind.quantity),
+        const ReportColumn('Net qty', ColumnKind.quantity),
+        const ReportColumn('Returned', ColumnKind.quantity),
         const ReportColumn('Discounts', ColumnKind.money),
         const ReportColumn('Sales', ColumnKind.money),
         if (profit) const ReportColumn('Cost', ColumnKind.money),
@@ -300,6 +402,7 @@ class ReportsService {
             p.name,
             p.sku,
             p.qty,
+            p.returnedQty,
             p.discount,
             p.total,
             if (profit) p.cost,
@@ -334,30 +437,43 @@ class ReportsService {
       GROUP BY COALESCE(c.name, 'Uncategorized')
       ORDER BY total DESC
       ''', variables: _vars(session, from, to)).get();
+    final returned = await _refundsBy(
+      session,
+      from,
+      to,
+      "COALESCE(c.name, 'Uncategorized')",
+      joins:
+          'LEFT JOIN products p ON p.id = i.product_id '
+          'LEFT JOIN categories c ON c.id = p.category_id',
+    );
+    final data = [
+      for (final row in rows)
+        () {
+          final r = returned[row.read<String>('name')];
+          return (
+            name: row.read<String>('name'),
+            qty: row.read<double>('qty') - (r?.qty ?? 0),
+            total: row.read<double>('total') - (r?.value ?? 0),
+            profit:
+                row.read<double>('total') -
+                row.read<double>('tax') -
+                row.read<double>('cost') -
+                ((r?.value ?? 0) - (r?.tax ?? 0) - (r?.cost ?? 0)),
+          );
+        }(),
+    ]..sort((a, b) => b.total.compareTo(a.total));
     return ReportResult(
       kind: ReportKind.categories,
       columns: [
         const ReportColumn('Category', ColumnKind.text, flex: 3),
-        const ReportColumn('Qty', ColumnKind.quantity),
+        const ReportColumn('Net qty', ColumnKind.quantity),
         const ReportColumn('Sales', ColumnKind.money),
         if (profit) const ReportColumn('Profit', ColumnKind.money),
       ],
       rows: [
-        for (final row in rows)
-          [
-            row.read<String>('name'),
-            row.read<double>('qty'),
-            row.read<double>('total'),
-            if (profit)
-              row.read<double>('total') -
-                  row.read<double>('tax') -
-                  row.read<double>('cost'),
-          ],
+        for (final c in data) [c.name, c.qty, c.total, if (profit) c.profit],
       ],
-      chart: [
-        for (final row in rows.take(12))
-          (row.read<String>('name'), row.read<double>('total')),
-      ],
+      chart: [for (final c in data.take(12)) (c.name, c.total)],
       chartLabel: 'Sales by category',
       footnote: profit ? _profitFootnote : null,
     );
@@ -426,9 +542,19 @@ class ReportsService {
       FROM cash_transactions
       WHERE store_id = ?1 AND created_at >= ?2 AND created_at < ?3
       ''', variables: _vars(session, from, to)).getSingle();
-    final cash = rows
+    final refundRows = await _database.customSelect('''
+      SELECT r.method AS method, COUNT(*) AS count, SUM(r.amount) AS amount
+      FROM sale_refunds r WHERE $_refundWhere
+      GROUP BY r.method ORDER BY amount DESC
+      ''', variables: _vars(session, from, to)).get();
+    final cashRefunds = refundRows
         .where((row) => row.read<String>('method') == 'cash')
         .fold(0.0, (sum, row) => sum + row.read<double>('amount'));
+    final cash =
+        rows
+            .where((row) => row.read<String>('method') == 'cash')
+            .fold(0.0, (sum, row) => sum + row.read<double>('amount')) -
+        cashRefunds;
     return ReportResult(
       kind: ReportKind.payments,
       kpis: [
@@ -436,7 +562,7 @@ class ReportsService {
           'Net cash from sales',
           cash - change.read<double>('change'),
           ColumnKind.money,
-          note: 'Cash tendered minus change',
+          note: 'Cash tendered minus change and cash refunds',
         ),
         ReportKpi('Pay-ins', cashOut.read<double>('pay_in'), ColumnKind.money),
         ReportKpi(
@@ -456,6 +582,12 @@ class ReportsService {
             row.read<String>('method').toUpperCase(),
             row.read<int>('count'),
             row.read<double>('amount'),
+          ],
+        for (final row in refundRows)
+          [
+            'REFUNDS · ${row.read<String>('method').toUpperCase()}',
+            row.read<int>('count'),
+            -row.read<double>('amount'),
           ],
       ],
       chart: [
