@@ -551,27 +551,18 @@ class _AdjustDialogState extends ConsumerState<_AdjustDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SegmentedButton<AdjustMode>(
-              segments: const [
-                ButtonSegment(
-                  value: AdjustMode.add,
-                  label: Text('Add'),
-                  icon: Icon(Icons.add_rounded),
+            AppSegmented<AdjustMode>(
+              items: const [
+                SegmentItem(AdjustMode.add, 'Add', icon: Icons.add_rounded),
+                SegmentItem(
+                  AdjustMode.remove,
+                  'Remove',
+                  icon: Icons.remove_rounded,
                 ),
-                ButtonSegment(
-                  value: AdjustMode.remove,
-                  label: Text('Remove'),
-                  icon: Icon(Icons.remove_rounded),
-                ),
-                ButtonSegment(
-                  value: AdjustMode.set,
-                  label: Text('Set to'),
-                  icon: Icon(Icons.edit_rounded),
-                ),
+                SegmentItem(AdjustMode.set, 'Set to', icon: Icons.edit_rounded),
               ],
-              selected: {_mode},
-              onSelectionChanged: (value) =>
-                  setState(() => _mode = value.first),
+              value: _mode,
+              onChanged: (value) => setState(() => _mode = value),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -594,15 +585,14 @@ class _AdjustDialogState extends ConsumerState<_AdjustDialog> {
               onSubmitted: (_) => _save(),
             ),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              menuMaxHeight: 360,
-              initialValue: _reason,
-              decoration: const InputDecoration(labelText: 'Reason'),
+            AppSelect<String>(
               items: [
                 for (final reason in adjustmentReasons)
-                  DropdownMenuItem(value: reason, child: Text(reason)),
+                  SelectItem(reason, reason),
               ],
+              value: _reason,
               onChanged: (value) => setState(() => _reason = value ?? _reason),
+              label: 'Reason',
             ),
             const SizedBox(height: 10),
             TextField(
@@ -967,21 +957,14 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                       'Add another active store first (Administration → Stores).',
                     );
                   }
-                  return DropdownButtonFormField<String>(
-                    menuMaxHeight: 360,
-                    initialValue: _toStoreId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Destination store',
-                    ),
+                  return AppSelect<String>(
                     items: [
                       for (final store in stores)
-                        DropdownMenuItem(
-                          value: store.id,
-                          child: Text('${store.name} · ${store.code}'),
-                        ),
+                        SelectItem(store.id, '${store.name} · ${store.code}'),
                     ],
+                    value: _toStoreId,
                     onChanged: (value) => setState(() => _toStoreId = value),
+                    label: 'Destination store',
                   );
                 },
               ),
@@ -1115,7 +1098,6 @@ class _MovementsTabState extends ConsumerState<_MovementsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final range = _range;
     final stream = _stream;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1127,50 +1109,27 @@ class _MovementsTabState extends ConsumerState<_MovementsTab> {
           children: [
             SizedBox(
               width: 200,
-              child: DropdownButtonFormField<String?>(
-                menuMaxHeight: 360,
-                initialValue: _type,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Type'),
+              child: AppSelect<String?>(
                 items: [
-                  const DropdownMenuItem(value: null, child: Text('All types')),
+                  SelectItem(null, 'All types'),
                   for (final entry in _movementLabels.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(entry.value),
-                    ),
+                    SelectItem(entry.key, entry.value),
                 ],
+                value: _type,
                 onChanged: (value) => setState(() {
                   _type = value;
                   _bind();
                 }),
+                label: 'Type',
               ),
             ),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final picked = await pickDateRange(context, initial: _range);
-                if (picked != null) {
-                  setState(() {
-                    _range = picked;
-                    _bind();
-                  });
-                }
-              },
-              icon: const Icon(Icons.date_range_rounded, size: 18),
-              label: Text(
-                range == null
-                    ? 'All dates'
-                    : '${DateFormat('d MMM').format(range.start)} – ${DateFormat('d MMM y').format(range.end)}',
-              ),
+            DateRangeButton(
+              value: _range,
+              onChanged: (range) => setState(() {
+                _range = range;
+                _bind();
+              }),
             ),
-            if (range != null)
-              IconButton(
-                onPressed: () => setState(() {
-                  _range = null;
-                  _bind();
-                }),
-                icon: const Icon(Icons.close_rounded),
-              ),
             if (widget.productName != null)
               InputChip(
                 avatar: const Icon(Icons.inventory_2_outlined, size: 16),

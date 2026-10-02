@@ -499,27 +499,18 @@ class _NewRolesDialogState extends State<_NewRolesDialog> {
             onChanged: (_) => setState(() => _error = null),
           ),
           const SizedBox(height: 14),
-          DropdownButtonFormField<String?>(
-            menuMaxHeight: 360,
-            initialValue: _templateId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Start with permissions from',
-            ),
+          AppSelect<String?>(
             items: [
-              const DropdownMenuItem(
-                value: null,
-                child: Text('No permissions'),
-              ),
+              SelectItem(null, 'No permissions'),
               for (final role in widget.roles)
-                DropdownMenuItem(
-                  value: role.role.id,
-                  child: Text(
-                    '${role.role.name}  (${role.permissions.length} permissions)',
-                  ),
+                SelectItem(
+                  role.role.id,
+                  '${role.role.name}  (${role.permissions.length} permissions)',
                 ),
             ],
+            value: _templateId,
             onChanged: (value) => setState(() => _templateId = value),
+            label: 'Start with permissions from',
           ),
         ],
       ),

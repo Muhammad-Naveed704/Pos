@@ -23,6 +23,7 @@ import '../data/held_cart_repository.dart';
 import '../domain/pos_cart.dart';
 import '../../receipts/presentation/receipt_preview.dart';
 import '../../returns/presentation/refund_dialog.dart';
+import '../../scanning/camera_scanner.dart';
 import 'barcode_scanner.dart';
 import 'payment_dialog.dart';
 import 'pos_dialogs.dart';
@@ -249,7 +250,14 @@ class _PosPageState extends ConsumerState<PosPage> {
                 });
               },
               decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+                prefixIcon: Tooltip(
+                  message: 'Scan with camera',
+                  child: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                    color: context.colors.primary,
+                    onPressed: _scanWithCamera,
+                  ),
+                ),
                 hintText: 'Scan a barcode or search by name / SKU',
                 suffixIcon: ListenableBuilder(
                   listenable: _search,
@@ -458,6 +466,13 @@ class _PosPageState extends ConsumerState<PosPage> {
           percent: result.percent.clamp(0, 100).toDouble(),
         );
     _searchFocus.requestFocus();
+  }
+
+  Future<void> _scanWithCamera() async {
+    final code = await scanWithCamera(context, title: 'Scan product');
+    if (code == null || !mounted) return;
+    _flashScan(code);
+    await _searchSubmitted(code);
   }
 
   Future<void> _startReturn() async {
@@ -1053,7 +1068,7 @@ class _CartPanel extends ConsumerWidget {
                         child: FilledButton(
                           onPressed: onPay,
                           style: FilledButton.styleFrom(
-                            textStyle: const TextStyle(
+                            textStyle: context.text.labelLarge?.copyWith(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
                             ),

@@ -23,7 +23,8 @@ abstract final class AppTheme {
     final density = switch (settings.density) {
       AppDensity.compact => const VisualDensity(horizontal: -1, vertical: -2),
       AppDensity.comfortable => VisualDensity.standard,
-      AppDensity.spacious => VisualDensity.comfortable,
+      // VisualDensity.comfortable is denser than standard; touch needs more.
+      AppDensity.spacious => const VisualDensity(horizontal: 0, vertical: 1),
     };
     final gap = switch (settings.density) {
       AppDensity.compact => 6.0,
@@ -45,6 +46,12 @@ abstract final class AppTheme {
       ),
     };
 
+    // Buttons match text-field height so toolbars line up.
+    final buttonHeight = switch (settings.density) {
+      AppDensity.compact => 42.0,
+      AppDensity.comfortable => 48.0,
+      AppDensity.spacious => 54.0,
+    };
     final useSeed = settings.source != ColorSource.preset && seed != null;
     final subThemes = FlexSubThemesData(
       interactionEffects: true,
@@ -170,8 +177,175 @@ abstract final class AppTheme {
           scheme.onSurface.withValues(alpha: 0.24),
         ),
       ),
+      inputDecorationTheme: _inputs(scheme, radius, inputPadding, dark),
+      dropdownMenuTheme: DropdownMenuThemeData(
+        inputDecorationTheme: _inputs(scheme, radius, inputPadding, dark),
+        menuStyle: _menuStyle(scheme, radius),
+      ),
+      menuTheme: MenuThemeData(style: _menuStyle(scheme, radius)),
+      popupMenuTheme: PopupMenuThemeData(
+        color: scheme.surfaceContainerLowest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.25),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius),
+          side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: Size(0, buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          textStyle: base.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radius),
+          ),
+          elevation: 0,
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: Size(0, buttonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          foregroundColor: scheme.onSurface,
+          textStyle: base.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+          side: BorderSide(color: scheme.outlineVariant),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radius),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          minimumSize: Size(0, buttonHeight - 4),
+          textStyle: base.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(radius),
+          ),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        shape: const StadiumBorder(),
+        side: BorderSide(color: scheme.outlineVariant),
+        backgroundColor: scheme.surface,
+        selectedColor: scheme.primaryContainer,
+        secondarySelectedColor: scheme.primaryContainer,
+        showCheckmark: false,
+        labelStyle: base.textTheme.labelLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+        ),
+        secondaryLabelStyle: base.textTheme.labelLarge?.copyWith(
+          color: scheme.onPrimaryContainer,
+          fontWeight: FontWeight.w700,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: SegmentedButton.styleFrom(
+          selectedBackgroundColor: scheme.primaryContainer,
+          selectedForegroundColor: scheme.onPrimaryContainer,
+          side: BorderSide(color: scheme.outlineVariant),
+          textStyle: base.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      datePickerTheme: DatePickerThemeData(
+        backgroundColor: scheme.surfaceContainerLowest,
+        surfaceTintColor: Colors.transparent,
+        headerBackgroundColor: scheme.primary,
+        headerForegroundColor: scheme.onPrimary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius + 8),
+        ),
+        dayShape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        rangeSelectionBackgroundColor: scheme.primaryContainer,
+      ),
+      dialogTheme: base.dialogTheme.copyWith(
+        backgroundColor: scheme.surfaceContainerLowest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 12,
+        shadowColor: Colors.black.withValues(alpha: 0.3),
+        titleTextStyle: base.textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w800,
+          color: scheme.onSurface,
+        ),
+      ),
+      listTileTheme: base.listTileTheme.copyWith(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius),
+        ),
+        selectedTileColor: scheme.primaryContainer.withValues(alpha: 0.6),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      ),
     );
   }
+
+  static InputDecorationTheme _inputs(
+    ColorScheme scheme,
+    double radius,
+    EdgeInsets padding,
+    bool dark,
+  ) {
+    OutlineInputBorder border(Color color, [double width = 1]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(radius),
+          borderSide: BorderSide(color: color, width: width),
+        );
+    return InputDecorationTheme(
+      filled: true,
+      fillColor: dark
+          ? scheme.surfaceContainerHigh.withValues(alpha: 0.6)
+          : scheme.surfaceContainerLowest,
+      hoverColor: scheme.primary.withValues(alpha: 0.04),
+      contentPadding: padding,
+      isDense: true,
+      border: border(scheme.outlineVariant),
+      enabledBorder: border(scheme.outlineVariant),
+      focusedBorder: border(scheme.primary, 1.8),
+      errorBorder: border(scheme.error),
+      focusedErrorBorder: border(scheme.error, 1.8),
+      disabledBorder: border(scheme.outlineVariant.withValues(alpha: 0.4)),
+      labelStyle: TextStyle(color: scheme.onSurfaceVariant),
+      floatingLabelStyle: TextStyle(
+        color: scheme.primary,
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: TextStyle(
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+      ),
+      prefixIconColor: scheme.onSurfaceVariant,
+      suffixIconColor: scheme.onSurfaceVariant,
+      helperMaxLines: 2,
+      errorMaxLines: 2,
+    );
+  }
+
+  static MenuStyle _menuStyle(ColorScheme scheme, double radius) => MenuStyle(
+    backgroundColor: WidgetStatePropertyAll(scheme.surfaceContainerLowest),
+    surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+    elevation: const WidgetStatePropertyAll(6),
+    shadowColor: WidgetStatePropertyAll(Colors.black.withValues(alpha: 0.16)),
+    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
+    shape: WidgetStatePropertyAll(
+      RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+      ),
+    ),
+  );
 }
 
 class _NoTransitionBuilder extends PageTransitionsBuilder {

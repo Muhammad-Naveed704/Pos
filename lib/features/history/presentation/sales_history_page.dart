@@ -74,17 +74,6 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
     _sales = _load();
   });
 
-  String get _rangeLabel {
-    final range = _range;
-    if (range == null) return 'All dates';
-    final format = DateFormat('d MMM y');
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    if (range.start == today && range.end == today) return 'Today';
-    if (range.start == range.end) return format.format(range.start);
-    return '${format.format(range.start)} – ${format.format(range.end)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final money = ref.watch(moneyFormatterProvider);
@@ -130,17 +119,10 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
                       ),
                     ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: _pickRange,
-                    icon: const Icon(Icons.date_range_rounded, size: 18),
-                    label: Text(_rangeLabel),
+                  DateRangeButton(
+                    value: _range,
+                    onChanged: (range) => _refresh(() => _range = range),
                   ),
-                  if (_range != null)
-                    IconButton(
-                      tooltip: 'All dates',
-                      onPressed: () => _refresh(() => _range = null),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
                   _filterDropdown(
                     label: 'Customer',
                     value: _customerId,
@@ -285,11 +267,6 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
     );
   }
 
-  Future<void> _pickRange() async {
-    final picked = await pickDateRange(context, initial: _range);
-    if (picked != null) _refresh(() => _range = picked);
-  }
-
   Widget _filterDropdown({
     required String label,
     required String? value,
@@ -298,21 +275,14 @@ class _SalesHistoryPageState extends ConsumerState<SalesHistoryPage> {
     double width = 170,
   }) => SizedBox(
     width: width,
-    child: DropdownButtonFormField<String?>(
-      menuMaxHeight: 360,
-      isExpanded: true,
-      initialValue: value,
-      decoration: InputDecoration(labelText: label),
+    child: AppSelect<String?>(
       items: [
-        const DropdownMenuItem(value: null, child: Text('All')),
-        ...choices.map(
-          (choice) => DropdownMenuItem(
-            value: choice.id,
-            child: Text(choice.label, overflow: TextOverflow.ellipsis),
-          ),
-        ),
+        SelectItem(null, 'All'),
+        ...choices.map((choice) => SelectItem(choice.id, choice.label)),
       ],
+      value: value,
       onChanged: onChanged,
+      label: label,
     ),
   );
 

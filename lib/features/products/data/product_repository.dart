@@ -337,6 +337,33 @@ class ProductRepository {
     );
   }
 
+  /// Whether [barcode] or [sku] is already used by another product.
+  Future<({bool barcode, bool sku})> codesInUse({
+    String? barcode,
+    String? sku,
+    String? exceptProductId,
+  }) async {
+    Future<bool> taken(String column, String? value) async {
+      final code = value?.trim();
+      if (code == null || code.isEmpty) return false;
+      final rows = await _database
+          .customSelect(
+            'SELECT id FROM products WHERE $column = ? AND id <> ? LIMIT 1',
+            variables: [
+              Variable.withString(column == 'sku' ? code.toUpperCase() : code),
+              Variable.withString(exceptProductId ?? ''),
+            ],
+          )
+          .get();
+      return rows.isNotEmpty;
+    }
+
+    return (
+      barcode: await taken('barcode', barcode),
+      sku: await taken('sku', sku),
+    );
+  }
+
   static String? _emptyToNull(String? value) {
     final trimmed = value?.trim();
     return trimmed == null || trimmed.isEmpty ? null : trimmed;

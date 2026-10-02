@@ -110,27 +110,26 @@ class _AppearanceTab extends ConsumerWidget {
               _SettingRow(
                 title: 'Colour mode',
                 subtitle: 'Follow Windows or choose a fixed appearance.',
-                control: SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment(
-                      value: ThemeMode.light,
-                      label: Text('Light'),
-                      icon: Icon(Icons.light_mode_outlined),
+                control: AppSegmented<ThemeMode>(
+                  items: const [
+                    SegmentItem(
+                      ThemeMode.light,
+                      'Light',
+                      icon: Icons.light_mode_outlined,
                     ),
-                    ButtonSegment(
-                      value: ThemeMode.dark,
-                      label: Text('Dark'),
-                      icon: Icon(Icons.dark_mode_outlined),
+                    SegmentItem(
+                      ThemeMode.dark,
+                      'Dark',
+                      icon: Icons.dark_mode_outlined,
                     ),
-                    ButtonSegment(
-                      value: ThemeMode.system,
-                      label: Text('System'),
-                      icon: Icon(Icons.computer_outlined),
+                    SegmentItem(
+                      ThemeMode.system,
+                      'System',
+                      icon: Icons.computer_outlined,
                     ),
                   ],
-                  selected: {settings.mode},
-                  onSelectionChanged: (value) =>
-                      set(settings.copyWith(mode: value.first)),
+                  value: settings.mode,
+                  onChanged: (value) => set(settings.copyWith(mode: value)),
                 ),
               ),
               const Divider(),
@@ -141,30 +140,30 @@ class _AppearanceTab extends ConsumerWidget {
                           ? 'Windows accent is unavailable; using your custom colour.'
                           : 'Using your Windows accent colour.')
                     : 'Pick a preset, your Windows accent, or any colour.',
-                control: SegmentedButton<ColorSource>(
-                  segments: const [
-                    ButtonSegment(
-                      value: ColorSource.preset,
-                      label: Text('Presets'),
-                      icon: Icon(Icons.auto_awesome_outlined),
+                control: AppSegmented<ColorSource>(
+                  items: const [
+                    SegmentItem(
+                      ColorSource.preset,
+                      'Presets',
+                      icon: Icons.auto_awesome_outlined,
                     ),
-                    ButtonSegment(
-                      value: ColorSource.windows,
-                      label: Text('Windows'),
-                      icon: Icon(Icons.window_outlined),
+                    SegmentItem(
+                      ColorSource.windows,
+                      'Windows',
+                      icon: Icons.window_outlined,
                     ),
-                    ButtonSegment(
-                      value: ColorSource.custom,
-                      label: Text('Custom'),
-                      icon: Icon(Icons.colorize_outlined),
+                    SegmentItem(
+                      ColorSource.custom,
+                      'Custom',
+                      icon: Icons.colorize_outlined,
                     ),
                   ],
-                  selected: {settings.source},
-                  onSelectionChanged: (value) {
-                    if (value.first == ColorSource.windows) {
+                  value: settings.source,
+                  onChanged: (value) {
+                    if (value == ColorSource.windows) {
                       ref.invalidate(windowsAccentProvider);
                     }
-                    set(settings.copyWith(source: value.first));
+                    set(settings.copyWith(source: value));
                   },
                 ),
               ),
@@ -233,17 +232,11 @@ class _AppearanceTab extends ConsumerWidget {
                 subtitle: 'Windows system fonts keep StoreFlow fully offline.',
                 control: SizedBox(
                   width: 260,
-                  child: DropdownButtonFormField<String>(
-                    menuMaxHeight: 360,
-                    initialValue: settings.fontFamily,
-                    isExpanded: true,
+                  child: AppSelect<String>(
                     items: [
-                      for (final font in systemFonts)
-                        DropdownMenuItem(
-                          value: font,
-                          child: Text(font, style: TextStyle(fontFamily: font)),
-                        ),
+                      for (final font in systemFonts) SelectItem(font, font),
                     ],
+                    value: settings.fontFamily,
                     onChanged: (value) {
                       if (value != null) {
                         set(settings.copyWith(fontFamily: value));
@@ -274,14 +267,13 @@ class _AppearanceTab extends ConsumerWidget {
               _SettingRow(
                 title: 'Density',
                 subtitle: settings.density.description,
-                control: SegmentedButton<AppDensity>(
-                  segments: [
+                control: AppSegmented<AppDensity>(
+                  items: [
                     for (final density in AppDensity.values)
-                      ButtonSegment(value: density, label: Text(density.label)),
+                      SegmentItem(density, density.label),
                   ],
-                  selected: {settings.density},
-                  onSelectionChanged: (value) =>
-                      set(settings.copyWith(density: value.first)),
+                  value: settings.density,
+                  onChanged: (value) => set(settings.copyWith(density: value)),
                 ),
               ),
               const Divider(),
@@ -304,14 +296,14 @@ class _AppearanceTab extends ConsumerWidget {
               _SettingRow(
                 title: 'Animations',
                 subtitle: 'Turn off for slower PCs or reduced motion.',
-                control: SegmentedButton<AppAnimationLevel>(
-                  segments: [
+                control: AppSegmented<AppAnimationLevel>(
+                  items: [
                     for (final level in AppAnimationLevel.values)
-                      ButtonSegment(value: level, label: Text(level.label)),
+                      SegmentItem(level, level.label),
                   ],
-                  selected: {settings.animationLevel},
-                  onSelectionChanged: (value) =>
-                      set(settings.copyWith(animationLevel: value.first)),
+                  value: settings.animationLevel,
+                  onChanged: (value) =>
+                      set(settings.copyWith(animationLevel: value)),
                 ),
               ),
             ],
@@ -846,43 +838,34 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
             Row(
               children: [
                 Expanded(
-                  child: DropdownButtonFormField<String>(
-                    menuMaxHeight: 360,
-                    initialValue: _draft.currencyCode,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Currency'),
+                  child: AppSelect<String>(
                     items: [
                       for (final currency in Currencies.all)
-                        DropdownMenuItem(
-                          value: currency.code,
-                          child: Text(
-                            '${currency.code} · ${currency.symbol} · ${currency.name}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        SelectItem(
+                          currency.code,
+                          '${currency.code} · ${currency.symbol} · ${currency.name}',
                         ),
                     ],
+                    value: _draft.currencyCode,
                     onChanged: (value) =>
                         _edit((draft) => draft.copyWith(currencyCode: value)),
+                    label: 'Currency',
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: DropdownButtonFormField<NumberStyle>(
-                    menuMaxHeight: 360,
-                    initialValue: _draft.numberStyle,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Number format',
-                    ),
+                  child: AppSelect<NumberStyle>(
                     items: [
                       for (final style in NumberStyle.values)
-                        DropdownMenuItem(
-                          value: style,
-                          child: Text('${style.label}  ·  ${style.example}'),
+                        SelectItem(
+                          style,
+                          '${style.label}  ·  ${style.example}',
                         ),
                     ],
+                    value: _draft.numberStyle,
                     onChanged: (value) =>
                         _edit((draft) => draft.copyWith(numberStyle: value)),
+                    label: 'Number format',
                   ),
                 ),
               ],
@@ -890,21 +873,14 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
             const SizedBox(height: 14),
             Row(
               children: [
-                SegmentedButton<SymbolPosition>(
-                  segments: [
-                    ButtonSegment(
-                      value: SymbolPosition.before,
-                      label: Text('${preview.symbol} 100'),
-                    ),
-                    ButtonSegment(
-                      value: SymbolPosition.after,
-                      label: Text('100 ${preview.symbol}'),
-                    ),
+                AppSegmented<SymbolPosition>(
+                  items: [
+                    SegmentItem(SymbolPosition.before, '${preview.symbol} 100'),
+                    SegmentItem(SymbolPosition.after, '100 ${preview.symbol}'),
                   ],
-                  selected: {_draft.symbolPosition},
-                  onSelectionChanged: (value) => _edit(
-                    (draft) => draft.copyWith(symbolPosition: value.first),
-                  ),
+                  value: _draft.symbolPosition,
+                  onChanged: (value) =>
+                      _edit((draft) => draft.copyWith(symbolPosition: value)),
                 ),
                 const Spacer(),
                 Text(
@@ -925,21 +901,16 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
           alignment: Alignment.centerLeft,
           child: SizedBox(
             width: 380,
-            child: DropdownButtonFormField<String>(
-              menuMaxHeight: 360,
-              initialValue: commonTimezones.contains(_draft.timezone)
+            child: AppSelect<String>(
+              items: [
+                for (final zone in commonTimezones) SelectItem(zone, zone),
+              ],
+              value: commonTimezones.contains(_draft.timezone)
                   ? _draft.timezone
                   : null,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Business time zone',
-              ),
-              items: [
-                for (final zone in commonTimezones)
-                  DropdownMenuItem(value: zone, child: Text(zone)),
-              ],
               onChanged: (value) =>
                   _edit((draft) => draft.copyWith(timezone: value)),
+              label: 'Business time zone',
             ),
           ),
         ),
@@ -956,27 +927,27 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SegmentedButton<TaxMode>(
-            segments: const [
-              ButtonSegment(
-                value: TaxMode.disabled,
-                label: Text('No tax'),
-                icon: Icon(Icons.block_rounded),
+          AppSegmented<TaxMode>(
+            items: const [
+              SegmentItem(
+                TaxMode.disabled,
+                'No tax',
+                icon: Icons.block_rounded,
               ),
-              ButtonSegment(
-                value: TaxMode.exclusive,
-                label: Text('Added on top'),
-                icon: Icon(Icons.add_rounded),
+              SegmentItem(
+                TaxMode.exclusive,
+                'Added on top',
+                icon: Icons.add_rounded,
               ),
-              ButtonSegment(
-                value: TaxMode.inclusive,
-                label: Text('Included in price'),
-                icon: Icon(Icons.price_check_rounded),
+              SegmentItem(
+                TaxMode.inclusive,
+                'Included in price',
+                icon: Icons.price_check_rounded,
               ),
             ],
-            selected: {_draft.taxMode},
-            onSelectionChanged: (value) =>
-                _edit((draft) => draft.copyWith(taxMode: value.first)),
+            value: _draft.taxMode,
+            onChanged: (value) =>
+                _edit((draft) => draft.copyWith(taxMode: value)),
           ),
           const SizedBox(height: 14),
           Row(

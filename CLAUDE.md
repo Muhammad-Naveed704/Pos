@@ -76,6 +76,22 @@ modules. Their presence does not mean their workflows are complete.
 - Motion: `flutter_animate` (always through `.entrance()`/`AppTokens.motion`,
   which honour the user's animation setting)
 - Charts: `fl_chart`
+- Camera barcode scanning: `camera` + `camera_windows` (preview and stills)
+  with `flutter_zxing` (zxing-cpp via FFI; EAN/UPC/Code 128/QR). zxing-cpp is
+  compiled with MSVC/CMake on the first Windows build (slow once).
+- Date-range calendar: `calendar_date_picker2` (MIT)
+
+UI building blocks live in `lib/core/ui/` (exported by `ui_kit.dart`). Use
+`AppSelect` (Material 3 `DropdownMenu`, searchable, follows value changes),
+`AppSegmented` (sliding segmented control), `DateRangeButton` (presets +
+calendar popover) and `SearchField`. Do not add new `DropdownButtonFormField`
+or `SegmentedButton` call sites: the former only reads its initial value,
+which caused stale selections after reloads.
+
+Theme rule: any `ButtonStyle.textStyle`, chip `labelStyle` or similar must be
+derived from `textTheme` (e.g. `textTheme.labelLarge?.copyWith(...)`). A bare
+`TextStyle(fontWeight: ...)` replaces the whole style, drops the font family,
+and made buttons ignore the font chosen in Settings.
 
 See `pubspec.yaml` for exact constraints. Do not upgrade packages incidentally
 while implementing an unrelated feature.
@@ -426,6 +442,13 @@ separate widget state. Tracked products cannot be added beyond stock unless
 `inventory.allowNegative` is on. An unmatched scan shows a toast; if exactly
 one search result is visible, Enter adds it.
 
+Camera scanning: the scan icon in the POS search box (and the camera button
+on product pickers and the product editor's barcode field) opens
+`scanWithCamera`. Windows cameras do not stream frames to Flutter, so the
+dialog takes a still every ~120 ms and decodes it with zxing-cpp (~25 ms per
+frame), then returns the first code. The product editor can also generate an
+in-store EAN-13 (prefix 2x, valid check digit, unique).
+
 USB (keyboard-wedge) barcode scanners work anywhere on the POS page:
 `ScannerKeyBuffer` captures keystrokes while the POS page has focus but the
 search field does not, delivers Enter-terminated bursts as scans, and moves
@@ -542,13 +565,20 @@ used. Current coverage includes:
 - Business settings load, permission denial, persistence, audit and fallbacks
 - Gate text-input regression (edit/delete/retype on login and setup) and
   legacy theme-preference migration
+- AppSelect value-follow regression, AppSegmented, date presets, EAN-13
+- Cash figures net of change (payment mix and payment-method report)
 - 1280×720 Dashboard → POS → Settings → Sales History smoke navigation
+
+Visual QA: `flutter test tool/screens_test.dart --dart-define=SHOTS=<dir>
+--dart-define=MODE=light|dark` renders the main pages with real Windows fonts
+and saves PNGs. It is not part of the suite (it needs Windows fonts); it may
+hang on teardown after writing the images, which is harmless.
 
 Last verified before this handoff:
 
 - `dart format .` — clean
 - `flutter analyze` — zero issues
-- `flutter test` — 69 tests passed
+- `flutter test` — 74 tests passed
 - Windows release build — passed at the current root
 
 Always repeat format, analyze, tests, and release build after material changes.
@@ -587,8 +617,10 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
 - Do not call a repository future or create a Drift `watch()` stream inside
   `build()`; cache it in state and rebind only when a filter changes
   (a new stream instance makes `StreamBuilder` resubscribe and flicker).
-- Order ledgers by `created_at` and then `rowid`; timestamps have one-second
-  precision.
+- Order ledgers and lists by `created_at` and then `rowid`; timestamps have
+  one-second precision.
+- Payments store the amount tendered. Any cash total must subtract
+  `sales.change_amount` (change is always paid from cash).
 - Preserve unrelated user changes; inspect the working tree before editing.
 - Run build_runner after Drift schema changes and all quality gates before handoff.
 

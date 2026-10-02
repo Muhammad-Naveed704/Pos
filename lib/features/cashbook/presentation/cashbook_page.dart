@@ -400,17 +400,16 @@ class _EntryDialogState extends ConsumerState<_EntryDialog> {
               onSubmitted: (_) => _save(),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              menuMaxHeight: 360,
-              initialValue: _category,
-              decoration: const InputDecoration(labelText: 'Category'),
+            AppSelect<String>(
               items: [
                 for (final category
                     in payOut ? payOutCategories : payInCategories)
-                  DropdownMenuItem(value: category, child: Text(category)),
+                  SelectItem(category, category),
               ],
+              value: _category,
               onChanged: (value) =>
                   setState(() => _category = value ?? _category),
+              label: 'Category',
             ),
             const SizedBox(height: 12),
             TextField(

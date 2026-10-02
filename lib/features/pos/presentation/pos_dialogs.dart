@@ -476,15 +476,14 @@ class _LineEditorState extends State<_LineEditor> {
               const SizedBox(height: 14),
               Row(
                 children: [
-                  SegmentedButton<bool>(
-                    showSelectedIcon: false,
-                    segments: [
-                      const ButtonSegment(value: true, label: Text('%')),
-                      ButtonSegment(value: false, label: Text(money.symbol)),
+                  AppSegmented<bool>(
+                    items: [
+                      SegmentItem(true, '%'),
+                      SegmentItem(false, money.symbol),
                     ],
-                    selected: {_percent},
-                    onSelectionChanged: (value) => setState(() {
-                      _percent = value.first;
+                    value: _percent,
+                    onChanged: (value) => setState(() {
+                      _percent = value;
                       _discount.clear();
                     }),
                   ),
@@ -630,15 +629,14 @@ class _SaleDiscountDialogState extends State<_SaleDiscountDialog> {
         children: [
           Row(
             children: [
-              SegmentedButton<bool>(
-                showSelectedIcon: false,
-                segments: [
-                  const ButtonSegment(value: true, label: Text('Percent')),
-                  ButtonSegment(value: false, label: Text(widget.money.symbol)),
+              AppSegmented<bool>(
+                items: [
+                  SegmentItem(true, 'Percent'),
+                  SegmentItem(false, widget.money.symbol),
                 ],
-                selected: {_percent},
-                onSelectionChanged: (value) => setState(() {
-                  _percent = value.first;
+                value: _percent,
+                onChanged: (value) => setState(() {
+                  _percent = value;
                   _value.clear();
                 }),
               ),

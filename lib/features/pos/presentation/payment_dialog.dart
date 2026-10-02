@@ -337,7 +337,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
                     style: FilledButton.styleFrom(
                       backgroundColor: tokens.success,
                       foregroundColor: tokens.onSuccess,
-                      textStyle: const TextStyle(
+                      textStyle: context.text.labelLarge?.copyWith(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
                       ),
@@ -390,18 +390,18 @@ class _TenderRow extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 12),
     child: Row(
       children: [
-        SegmentedButton<TenderMethod>(
-          showSelectedIcon: false,
-          segments: [
+        AppSegmented<TenderMethod>(
+          items: [
             for (final method in TenderMethod.values)
-              ButtonSegment(
-                value: method,
-                icon: Icon(method.icon, size: 18),
+              SegmentItem(
+                method,
+                null,
+                icon: method.icon,
                 tooltip: method.label,
               ),
           ],
-          selected: {tender.method},
-          onSelectionChanged: (value) => onMethod(value.first),
+          value: tender.method,
+          onChanged: (value) => onMethod(value),
         ),
         const SizedBox(width: 12),
         Expanded(

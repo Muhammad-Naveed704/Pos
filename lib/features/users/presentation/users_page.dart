@@ -322,42 +322,27 @@ class _UserEditorState extends ConsumerState<_UserEditor> {
             Row(
               children: [
                 Expanded(
-                  child: DropdownButtonFormField<String>(
-                    menuMaxHeight: 360,
-                    initialValue: _roleId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Role'),
+                  child: AppSelect<String>(
                     items: [
                       for (final role in widget.roles)
-                        DropdownMenuItem(
-                          value: role.id,
-                          child: Text(role.name),
-                        ),
+                        SelectItem(role.id, role.name),
                     ],
+                    value: _roleId,
                     onChanged: (value) => setState(() => _roleId = value),
+                    label: 'Role',
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: DropdownButtonFormField<String?>(
-                    menuMaxHeight: 360,
-                    initialValue: _storeId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Store access',
-                    ),
+                  child: AppSelect<String?>(
                     items: [
-                      const DropdownMenuItem(
-                        value: null,
-                        child: Text('All stores'),
-                      ),
+                      SelectItem(null, 'All stores'),
                       for (final store in widget.stores)
-                        DropdownMenuItem(
-                          value: store.id,
-                          child: Text(store.name),
-                        ),
+                        SelectItem(store.id, store.name),
                     ],
+                    value: _storeId,
                     onChanged: (value) => setState(() => _storeId = value),
+                    label: 'Store access',
                   ),
                 ),
               ],

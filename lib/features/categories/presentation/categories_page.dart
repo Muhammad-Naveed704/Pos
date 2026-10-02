@@ -133,25 +133,16 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
                   decoration: const InputDecoration(labelText: 'Code'),
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  menuMaxHeight: 360,
-                  initialValue: parentId,
-                  decoration: const InputDecoration(labelText: 'Parent'),
+                AppSelect<String?>(
                   items: [
-                    const DropdownMenuItem(
-                      value: null,
-                      child: Text('No parent'),
-                    ),
+                    SelectItem(null, 'No parent'),
                     ...choices
                         .where((item) => item.id != category?.id)
-                        .map(
-                          (item) => DropdownMenuItem(
-                            value: item.id,
-                            child: Text(item.name),
-                          ),
-                        ),
+                        .map((item) => SelectItem(item.id, item.name)),
                   ],
+                  value: parentId,
                   onChanged: (value) => parentId = value,
+                  label: 'Parent',
                 ),
                 const SizedBox(height: 12),
                 TextField(

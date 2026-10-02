@@ -121,7 +121,6 @@ class _PurchaseListState extends ConsumerState<_PurchaseList>
   Widget build(BuildContext context) {
     super.build(context);
     final money = ref.watch(moneyFormatterProvider);
-    final range = _range;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -143,31 +142,13 @@ class _PurchaseListState extends ConsumerState<_PurchaseList>
                   _bind();
                 }),
               ),
-            OutlinedButton.icon(
-              onPressed: () async {
-                final picked = await pickDateRange(context, initial: _range);
-                if (picked != null) {
-                  setState(() {
-                    _range = picked;
-                    _bind();
-                  });
-                }
-              },
-              icon: const Icon(Icons.date_range_rounded, size: 18),
-              label: Text(
-                range == null
-                    ? 'All dates'
-                    : '${DateFormat('d MMM').format(range.start)} – ${DateFormat('d MMM y').format(range.end)}',
-              ),
+            DateRangeButton(
+              value: _range,
+              onChanged: (range) => setState(() {
+                _range = range;
+                _bind();
+              }),
             ),
-            if (range != null)
-              IconButton(
-                onPressed: () => setState(() {
-                  _range = null;
-                  _bind();
-                }),
-                icon: const Icon(Icons.close_rounded),
-              ),
           ],
         ),
         const SizedBox(height: 12),
@@ -563,30 +544,19 @@ class _PurchaseDocumentDialogState
                       stream: _suppliers,
                       builder: (context, snapshot) {
                         final suppliers = snapshot.data ?? const <Supplier>[];
-                        return DropdownButtonFormField<String?>(
-                          key: ValueKey('${suppliers.length}-$_supplierId'),
-                          menuMaxHeight: 360,
-                          initialValue:
-                              suppliers.any((s) => s.id == _supplierId)
+                        return AppSelect<String?>(
+                          items: [
+                            SelectItem(null, 'No supplier'),
+                            for (final supplier in suppliers)
+                              SelectItem(supplier.id, supplier.name),
+                          ],
+                          value: suppliers.any((s) => s.id == _supplierId)
                               ? _supplierId
                               : null,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Supplier',
-                          ),
-                          items: [
-                            const DropdownMenuItem(
-                              value: null,
-                              child: Text('No supplier'),
-                            ),
-                            for (final supplier in suppliers)
-                              DropdownMenuItem(
-                                value: supplier.id,
-                                child: Text(supplier.name),
-                              ),
-                          ],
                           onChanged: (value) =>
                               setState(() => _supplierId = value),
+                          label: 'Supplier',
+                          key: ValueKey('${suppliers.length}-$_supplierId'),
                         );
                       },
                     ),

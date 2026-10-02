@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +12,7 @@ import '../../settings/data/business_settings_repository.dart';
 import '../../../core/ui/import_dialog.dart';
 import '../data/product_import_service.dart';
 import '../data/product_repository.dart';
+import 'product_editor.dart';
 
 class ProductsPage extends ConsumerStatefulWidget {
   const ProductsPage({super.key});
@@ -183,7 +185,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                                   !item.product.trackInventory
                                       ? const Text('—')
                                       : StatusPill(
-                                          money.number(item.store.stockQty),
+                                          '${_qty(item.store.stockQty)} ${item.product.unit}',
                                           tone: item.store.stockQty <= 0
                                               ? PillTone.danger
                                               : item.store.stockQty <=
@@ -346,324 +348,18 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
   Future<void> _edit(BuildContext context, {CatalogProduct? item}) async {
     final database = ref.read(databaseProvider);
-    final categories = await (database.select(
-      database.categories,
-    )..where((row) => row.isActive.equals(true))).get();
+    final categories =
+        await (database.select(database.categories)
+              ..where((row) => row.isActive.equals(true))
+              ..orderBy([(row) => OrderingTerm.asc(row.name)]))
+            .get();
     if (!context.mounted) return;
-    final money = ref.read(moneyFormatterProvider);
-    // Pre-fill numbers with the store's decimal separator so they parse back
-    // exactly (e.g. 1.125 kg is not mistaken for 1,125).
-    String n(num? value, [String empty = '0']) {
-      if (value == null) return empty;
-      final text = value == value.roundToDouble()
-          ? value.toStringAsFixed(0)
-          : value.toString();
-      return money.decimalSeparator == ',' ? text.replaceAll('.', ',') : text;
-    }
-
-    final sku = TextEditingController(text: item?.product.sku ?? '');
-    final barcode = TextEditingController(text: item?.product.barcode ?? '');
-    final name = TextEditingController(text: item?.product.name ?? '');
-    final shortName = TextEditingController(
-      text: item?.product.shortName ?? '',
+    final saved = await showProductEditor(
+      context,
+      categories: categories,
+      item: item,
     );
-    final cost = TextEditingController(text: n(item?.product.costPrice));
-    final price = TextEditingController(text: n(item?.product.salePrice));
-    final wholesale = TextEditingController(
-      text: n(item?.product.wholesalePrice, ''),
-    );
-    final tax = TextEditingController(text: n(item?.product.taxRate));
-    final discount = TextEditingController(
-      text: n(item?.product.defaultDiscount),
-    );
-    final unit = TextEditingController(text: item?.product.unit ?? 'each');
-    final stock = TextEditingController(text: n(item?.store.stockQty));
-    final reorder = TextEditingController(text: n(item?.store.reorderLevel));
-    final customPrice = TextEditingController(
-      text: n(item?.store.customSalePrice, ''),
-    );
-    final customDiscount = TextEditingController(
-      text: n(item?.store.customDiscount, ''),
-    );
-    final imagePath = TextEditingController(
-      text: item?.product.imagePath ?? '',
-    );
-    String? categoryId = item?.product.categoryId;
-    var active = item?.product.isActive ?? true;
-    var tracked = item?.product.trackInventory ?? true;
-    var available = item?.store.isAvailable ?? true;
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(item == null ? 'New product' : 'Edit product'),
-          content: SizedBox(
-            width: 720,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: name,
-                          autofocus: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Product name',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: shortName,
-                          decoration: const InputDecoration(
-                            labelText: 'Short name',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: sku,
-                          decoration: const InputDecoration(labelText: 'SKU'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: barcode,
-                          decoration: const InputDecoration(
-                            labelText: 'Barcode',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String?>(
-                          menuMaxHeight: 360,
-                          initialValue: categoryId,
-                          decoration: const InputDecoration(
-                            labelText: 'Category',
-                          ),
-                          items: [
-                            const DropdownMenuItem(
-                              value: null,
-                              child: Text('Uncategorized'),
-                            ),
-                            ...categories.map(
-                              (value) => DropdownMenuItem(
-                                value: value.id,
-                                child: Text(value.name),
-                              ),
-                            ),
-                          ],
-                          onChanged: (value) => categoryId = value,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: cost,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Cost price',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: price,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Sale price',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: wholesale,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Wholesale price',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: tax,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Tax %'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: discount,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Default discount %',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: unit,
-                          decoration: const InputDecoration(labelText: 'Unit'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: stock,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Store stock',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: reorder,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Reorder level',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: customPrice,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Store price override',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: imagePath,
-                          decoration: const InputDecoration(
-                            labelText: 'Product image path (optional)',
-                            prefixIcon: Icon(Icons.image_outlined),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: customDiscount,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Store discount %',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SwitchListTile(
-                          value: active,
-                          onChanged: (value) =>
-                              setDialogState(() => active = value),
-                          title: const Text('Active'),
-                        ),
-                      ),
-                      Expanded(
-                        child: SwitchListTile(
-                          value: tracked,
-                          onChanged: (value) =>
-                              setDialogState(() => tracked = value),
-                          title: const Text('Track stock'),
-                        ),
-                      ),
-                      Expanded(
-                        child: SwitchListTile(
-                          value: available,
-                          onChanged: (value) =>
-                              setDialogState(() => available = value),
-                          title: const Text('Available here'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Save product'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (saved != true) return;
-    await ref
-        .read(productRepositoryProvider)
-        .save(
-          session: ref.read(activeSessionProvider)!,
-          id: item?.product.id,
-          input: ProductInput(
-            sku: sku.text,
-            barcode: barcode.text,
-            name: name.text,
-            shortName: shortName.text,
-            categoryId: categoryId,
-            costPrice: money.parse(cost.text) ?? 0,
-            salePrice: money.parse(price.text) ?? 0,
-            wholesalePrice: money.parse(wholesale.text),
-            taxRate: money.parse(tax.text) ?? 0,
-            defaultDiscount: money.parse(discount.text) ?? 0,
-            unit: unit.text,
-            imagePath: imagePath.text,
-            isActive: active,
-            trackInventory: tracked,
-            stockQty: money.parse(stock.text) ?? 0,
-            reorderLevel: money.parse(reorder.text) ?? 0,
-            customSalePrice: money.parse(customPrice.text),
-            customDiscount: money.parse(customDiscount.text),
-            isAvailable: available,
-          ),
-        );
-    if (mounted) _reload();
+    if (saved && mounted) _reload();
   }
 
   Future<String?> _textPrompt(
@@ -696,3 +392,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     );
   }
 }
+
+String _qty(double value) => value == value.roundToDouble()
+    ? value.toStringAsFixed(0)
+    : value.toStringAsFixed(3).replaceFirst(RegExp(r'0+$'), '');

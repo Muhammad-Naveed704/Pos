@@ -431,58 +431,38 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
       ),
       3 => _Fields(
         children: [
-          DropdownButtonFormField<String>(
-            menuMaxHeight: 360,
-            initialValue: _currency,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Currency',
-              prefixIcon: Icon(Icons.payments_outlined),
-            ),
+          AppSelect<String>(
             items: [
               for (final currency in Currencies.all)
-                DropdownMenuItem(
-                  value: currency.code,
-                  child: Text(
-                    '${currency.code} · ${currency.symbol} · ${currency.name}',
-                  ),
+                SelectItem(
+                  currency.code,
+                  '${currency.code} · ${currency.symbol} · ${currency.name}',
                 ),
             ],
+            value: _currency,
             onChanged: (value) =>
                 setState(() => _currency = value ?? _currency),
+            label: 'Currency',
+            icon: Icons.payments_outlined,
           ),
-          DropdownButtonFormField<NumberStyle>(
-            menuMaxHeight: 360,
-            initialValue: _numberStyle,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Number format',
-              prefixIcon: Icon(Icons.pin_outlined),
-            ),
+          AppSelect<NumberStyle>(
             items: [
               for (final style in NumberStyle.values)
-                DropdownMenuItem(
-                  value: style,
-                  child: Text('${style.label}  ·  ${style.example}'),
-                ),
+                SelectItem(style, '${style.label}  ·  ${style.example}'),
             ],
+            value: _numberStyle,
             onChanged: (value) =>
                 setState(() => _numberStyle = value ?? _numberStyle),
+            label: 'Number format',
+            icon: Icons.pin_outlined,
           ),
-          DropdownButtonFormField<String>(
-            menuMaxHeight: 360,
-            initialValue: _timezone,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Time zone',
-              prefixIcon: Icon(Icons.schedule_rounded),
-            ),
-            items: [
-              for (final zone in commonTimezones)
-                DropdownMenuItem(value: zone, child: Text(zone)),
-            ],
+          AppSelect<String>(
+            items: [for (final zone in commonTimezones) SelectItem(zone, zone)],
+            value: _timezone,
             onChanged: (value) =>
                 setState(() => _timezone = value ?? _timezone),
+            label: 'Time zone',
+            icon: Icons.schedule_rounded,
           ),
           Row(
             children: [
@@ -497,18 +477,14 @@ class _SetupWizardState extends ConsumerState<SetupWizard> {
       ),
       4 => _Fields(
         children: [
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'disabled', label: Text('No tax')),
-              ButtonSegment(value: 'exclusive', label: Text('Added on top')),
-              ButtonSegment(
-                value: 'inclusive',
-                label: Text('Included in price'),
-              ),
+          AppSegmented<String>(
+            items: const [
+              SegmentItem('disabled', 'No tax'),
+              SegmentItem('exclusive', 'Added on top'),
+              SegmentItem('inclusive', 'Included in price'),
             ],
-            selected: {_taxMode},
-            onSelectionChanged: (value) =>
-                setState(() => _taxMode = value.first),
+            value: _taxMode,
+            onChanged: (value) => setState(() => _taxMode = value),
           ),
           _text(
             _taxLabel,

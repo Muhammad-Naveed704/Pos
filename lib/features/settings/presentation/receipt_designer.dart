@@ -328,28 +328,28 @@ class _ReceiptDesignerState extends ConsumerState<ReceiptDesigner>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SegmentedButton<ReceiptPaper>(
-            segments: [
+          AppSegmented<ReceiptPaper>(
+            items: [
               for (final paper in ReceiptPaper.values)
-                ButtonSegment(value: paper, label: Text(paper.label)),
+                SegmentItem(paper, paper.label),
             ],
-            selected: {_layout.paper},
-            onSelectionChanged: (value) =>
-                _edit((layout) => layout.copyWith(paper: value.first)),
+            value: _layout.paper,
+            onChanged: (value) =>
+                _edit((layout) => layout.copyWith(paper: value)),
           ),
           const SizedBox(height: 12),
           Row(
             children: [
               const Text('Text size'),
               const SizedBox(width: 12),
-              SegmentedButton<ReceiptFontSize>(
-                segments: [
+              AppSegmented<ReceiptFontSize>(
+                items: [
                   for (final size in ReceiptFontSize.values)
-                    ButtonSegment(value: size, label: Text(size.label)),
+                    SegmentItem(size, size.label),
                 ],
-                selected: {_layout.fontSize},
-                onSelectionChanged: (value) =>
-                    _edit((layout) => layout.copyWith(fontSize: value.first)),
+                value: _layout.fontSize,
+                onChanged: (value) =>
+                    _edit((layout) => layout.copyWith(fontSize: value)),
               ),
             ],
           ),
@@ -496,46 +496,36 @@ class _ReceiptDesignerState extends ConsumerState<ReceiptDesigner>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DropdownButtonFormField<String?>(
-            initialValue:
+          AppSelect<String?>(
+            items: [
+              SelectItem(null, 'Ask every time (print dialog)'),
+              for (final printer in _printers ?? const <Printer>[])
+                SelectItem(
+                  printer.name,
+                  printer.isDefault
+                      ? '${printer.name}  (default)'
+                      : printer.name,
+                ),
+            ],
+            value:
                 _printers?.any(
                       (printer) => printer.name == _printerPrefs.printerName,
                     ) ??
                     false
                 ? _printerPrefs.printerName
                 : null,
-            isExpanded: true,
-            menuMaxHeight: 320,
-            decoration: InputDecoration(
-              labelText: 'Receipt printer',
-              helperText: _printers == null
-                  ? 'Looking for printers…'
-                  : _printers!.isEmpty
-                  ? 'No printers found. The Windows print dialog will be used.'
-                  : null,
-            ),
-            items: [
-              const DropdownMenuItem(
-                value: null,
-                child: Text('Ask every time (print dialog)'),
-              ),
-              for (final printer in _printers ?? const <Printer>[])
-                DropdownMenuItem(
-                  value: printer.name,
-                  child: Text(
-                    printer.isDefault
-                        ? '${printer.name}  (default)'
-                        : printer.name,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
             onChanged: (value) => _savePrinter(
               ReceiptPrinterPrefs(
                 printerName: value,
                 directPrint: value != null && _printerPrefs.directPrint,
               ),
             ),
+            label: 'Receipt printer',
+            helperText: _printers == null
+                ? 'Looking for printers…'
+                : _printers!.isEmpty
+                ? 'No printers found. The Windows print dialog will be used.'
+                : null,
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

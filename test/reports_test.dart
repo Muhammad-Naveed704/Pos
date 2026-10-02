@@ -227,4 +227,46 @@ void main() {
     final after = await reports.run(owner, ReportKind.summary, today());
     expect(after.kpis.first.value, 500);
   });
+
+  test('cash figures exclude the change handed back', () async {
+    final products = ProductRepository(fixture.database);
+    final id = await products.save(
+      session: owner,
+      input: const ProductInput(
+        sku: 'FAN',
+        name: 'Fan',
+        salePrice: 1500,
+        stockQty: 3,
+      ),
+    );
+    final fan = (await products.byId(storeId: owner.store.id, productId: id))!;
+    await CheckoutService(fixture.database).checkout(
+      session: owner,
+      cart: PosCart(lines: [CartLine(catalogProduct: fan)]),
+      payments: const [
+        PaymentInput(method: 'cash', amount: Money.fromMinor(200000)),
+      ],
+    );
+    final payments = await ReportsService(fixture.database)
+        .run(owner, ReportKind.payments, today());
+    expect(payments.rows.first[2], 1500, reason: '2000 tendered − 500 change');
+    expect(payments.kpis.first.value, 1500);
+
+    SharedPreferences.setMockInitialValues({});
+    final container = ProviderContainer(
+      overrides: [
+        databaseProvider.overrideWithValue(fixture.database),
+        sharedPreferencesProvider.overrideWithValue(
+          await SharedPreferences.getInstance(),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(sessionControllerProvider.notifier)
+        .login('owner', 'test-password');
+    final metrics = await container.read(dashboardMetricsProvider.future);
+    expect(metrics.paymentMix['cash'], 1500);
+    expect(metrics.cashCollected, 1500);
+  });
 }

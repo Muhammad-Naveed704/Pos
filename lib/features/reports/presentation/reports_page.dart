@@ -13,8 +13,6 @@ import '../../settings/data/business_settings_repository.dart';
 import '../data/report_export.dart';
 import '../data/reports_service.dart';
 
-enum _Preset { today, yesterday, week, month, lastMonth, custom }
-
 class ReportsPage extends ConsumerStatefulWidget {
   const ReportsPage({super.key});
   @override
@@ -23,8 +21,7 @@ class ReportsPage extends ConsumerStatefulWidget {
 
 class _ReportsPageState extends ConsumerState<ReportsPage> {
   late ReportKind _kind;
-  _Preset _preset = _Preset.month;
-  late DateTimeRange _range = _rangeFor(_Preset.month);
+  DateTimeRange _range = DatePreset.thisMonth.range;
   Future<ReportResult>? _result;
   int? _sortColumn;
   bool _sortAscending = false;
@@ -40,31 +37,6 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     _load();
   }
 
-  static DateTimeRange _rangeFor(_Preset preset) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    return switch (preset) {
-      _Preset.today ||
-      _Preset.custom => DateTimeRange(start: today, end: today),
-      _Preset.yesterday => DateTimeRange(
-        start: today.subtract(const Duration(days: 1)),
-        end: today.subtract(const Duration(days: 1)),
-      ),
-      _Preset.week => DateTimeRange(
-        start: today.subtract(Duration(days: today.weekday - 1)),
-        end: today,
-      ),
-      _Preset.month => DateTimeRange(
-        start: DateTime(today.year, today.month),
-        end: today,
-      ),
-      _Preset.lastMonth => DateTimeRange(
-        start: DateTime(today.year, today.month - 1),
-        end: DateTime(today.year, today.month, 0),
-      ),
-    };
-  }
-
   void _load() {
     _sortColumn = null;
     _result = ref
@@ -72,12 +44,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         .run(ref.read(activeSessionProvider)!, _kind, _range);
   }
 
-  String get _period {
-    final f = DateFormat('d MMM y');
-    return _range.start == _range.end
-        ? f.format(_range.start)
-        : '${f.format(_range.start)} – ${f.format(_range.end)}';
-  }
+  String get _period => describeRange(_range);
 
   String _format(Object value, ColumnKind kind, MoneyFormatter money) {
     if (value is String) return value;
@@ -229,6 +196,18 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           ? '${session.store.name} · $_period'
                           : '${session.store.name} · current stock',
                       actions: [
+                        if (_kind.usesDates)
+                          DateRangeButton(
+                            value: _range,
+                            allowClear: false,
+                            onChanged: (range) {
+                              if (range == null) return;
+                              setState(() {
+                                _range = range;
+                                _load();
+                              });
+                            },
+                          ),
                         if (canExport && result != null) ...[
                           OutlinedButton.icon(
                             onPressed: () => _exportCsv(result),
@@ -243,54 +222,6 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                         ],
                       ],
                     ),
-                    if (_kind.usesDates) ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final (preset, label) in const [
-                            (_Preset.today, 'Today'),
-                            (_Preset.yesterday, 'Yesterday'),
-                            (_Preset.week, 'This week'),
-                            (_Preset.month, 'This month'),
-                            (_Preset.lastMonth, 'Last month'),
-                          ])
-                            ChoiceChip(
-                              label: Text(label),
-                              selected: _preset == preset,
-                              onSelected: (_) => setState(() {
-                                _preset = preset;
-                                _range = _rangeFor(preset);
-                                _load();
-                              }),
-                            ),
-                          ChoiceChip(
-                            avatar: const Icon(
-                              Icons.date_range_rounded,
-                              size: 16,
-                            ),
-                            label: Text(
-                              _preset == _Preset.custom ? _period : 'Custom…',
-                            ),
-                            selected: _preset == _Preset.custom,
-                            onSelected: (_) async {
-                              final picked = await pickDateRange(
-                                context,
-                                initial: _range,
-                              );
-                              if (picked != null) {
-                                setState(() {
-                                  _preset = _Preset.custom;
-                                  _range = picked;
-                                  _load();
-                                });
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
                     const SizedBox(height: 14),
                     Expanded(
                       child: snapshot.hasError
@@ -324,31 +255,45 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     return ListView(
       children: [
         if (result.kpis.isNotEmpty) ...[
-          Row(
-            children: [
-              for (var i = 0; i < result.kpis.length; i++) ...[
-                if (i > 0) const SizedBox(width: 12),
-                Expanded(
-                  child: StatCard(
-                    label: result.kpis[i].label,
-                    value: _format(
-                      result.kpis[i].value,
-                      result.kpis[i].kind,
-                      money,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const gap = 12.0;
+              final perRow = (constraints.maxWidth / 210).floor().clamp(
+                1,
+                result.kpis.length > 4
+                    ? (result.kpis.length / 2).ceil()
+                    : result.kpis.length,
+              );
+              final width =
+                  (constraints.maxWidth - gap * (perRow - 1)) / perRow;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (var i = 0; i < result.kpis.length; i++)
+                    SizedBox(
+                      width: width,
+                      child: StatCard(
+                        label: result.kpis[i].label,
+                        value: _format(
+                          result.kpis[i].value,
+                          result.kpis[i].kind,
+                          money,
+                        ),
+                        icon: switch (result.kpis[i].kind) {
+                          ColumnKind.percent => Icons.percent_rounded,
+                          ColumnKind.money => Icons.payments_outlined,
+                          _ => Icons.tag_rounded,
+                        },
+                        color:
+                            context.tokens.chartPalette[i %
+                                context.tokens.chartPalette.length],
+                        footnote: result.kpis[i].note,
+                      ),
                     ),
-                    icon: switch (result.kpis[i].kind) {
-                      ColumnKind.percent => Icons.percent_rounded,
-                      ColumnKind.money => Icons.payments_outlined,
-                      _ => Icons.tag_rounded,
-                    },
-                    color: context
-                        .tokens
-                        .chartPalette[i % context.tokens.chartPalette.length],
-                    footnote: result.kpis[i].note,
-                  ),
-                ),
-              ],
-            ],
+                ],
+              );
+            },
           ),
           const SizedBox(height: 14),
         ],

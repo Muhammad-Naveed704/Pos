@@ -81,6 +81,8 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
           AND date(payments.created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0)
       - COALESCE((SELECT SUM(change_amount) FROM sales
         WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS cash_collected,
+      COALESCE((SELECT SUM(change_amount) FROM sales
+        WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS change_today,
       COALESCE((SELECT SUM(amount) FROM sale_refunds
         WHERE store_id = ?1 AND kind = 'refund' AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0) AS refunds,
       COALESCE((SELECT SUM(amount) FROM sale_refunds
@@ -190,9 +192,12 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
           item.read<double>('revenue'),
         ),
     ],
+    // Payments store the amount tendered; change is handed back in cash.
     paymentMix: {
       for (final item in mixRows)
-        item.read<String>('method'): item.read<double>('total'),
+        item.read<String>('method'): item.read<String>('method') == 'cash'
+            ? item.read<double>('total') - row.read<double>('change_today')
+            : item.read<double>('total'),
     },
   );
 });

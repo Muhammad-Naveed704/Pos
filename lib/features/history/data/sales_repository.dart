@@ -150,7 +150,7 @@ class SalesRepository {
          LEFT JOIN payments p ON p.sale_id = s.id
          WHERE ${filters.join(' AND ')}
          GROUP BY s.id
-         ORDER BY s.created_at DESC
+         ORDER BY s.created_at DESC, s.rowid DESC
          LIMIT ? OFFSET ?''',
           variables: variables,
           readsFrom: {

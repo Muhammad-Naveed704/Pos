@@ -550,6 +550,10 @@ class ReportsService {
     final cashRefunds = refundRows
         .where((row) => row.read<String>('method') == 'cash')
         .fold(0.0, (sum, row) => sum + row.read<double>('amount'));
+    // Payments store the tendered amount; change always comes from cash.
+    double netOf(QueryRow row) => row.read<String>('method') == 'cash'
+        ? row.read<double>('amount') - change.read<double>('change')
+        : row.read<double>('amount');
     final cash =
         rows
             .where((row) => row.read<String>('method') == 'cash')
@@ -581,7 +585,7 @@ class ReportsService {
           [
             row.read<String>('method').toUpperCase(),
             row.read<int>('count'),
-            row.read<double>('amount'),
+            netOf(row),
           ],
         for (final row in refundRows)
           [
@@ -592,10 +596,7 @@ class ReportsService {
       ],
       chart: [
         for (final row in rows)
-          (
-            row.read<String>('method').toUpperCase(),
-            row.read<double>('amount'),
-          ),
+          (row.read<String>('method').toUpperCase(), netOf(row)),
       ],
       chartLabel: 'Amount by payment method',
     );

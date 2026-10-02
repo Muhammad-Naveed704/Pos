@@ -376,29 +376,16 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
                               Row(
                                 children: [
                                   const Text('Refund by  '),
-                                  SegmentedButton<String>(
-                                    showSelectedIcon: false,
-                                    segments: const [
-                                      ButtonSegment(
-                                        value: 'cash',
-                                        label: Text('Cash'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 'card',
-                                        label: Text('Card'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 'bank',
-                                        label: Text('Bank'),
-                                      ),
-                                      ButtonSegment(
-                                        value: 'other',
-                                        label: Text('Other'),
-                                      ),
+                                  AppSegmented<String>(
+                                    items: const [
+                                      SegmentItem('cash', 'Cash'),
+                                      SegmentItem('card', 'Card'),
+                                      SegmentItem('bank', 'Bank'),
+                                      SegmentItem('other', 'Other'),
                                     ],
-                                    selected: {_method ?? state.primaryMethod},
-                                    onSelectionChanged: (value) =>
-                                        setState(() => _method = value.first),
+                                    value: _method ?? state.primaryMethod,
+                                    onChanged: (value) =>
+                                        setState(() => _method = value),
                                   ),
                                 ],
                               ),
@@ -407,23 +394,16 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
                                 children: [
                                   SizedBox(
                                     width: 240,
-                                    child: DropdownButtonFormField<String>(
-                                      menuMaxHeight: 360,
-                                      initialValue: _reason,
-                                      isExpanded: true,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Reason',
-                                      ),
+                                    child: AppSelect<String>(
                                       items: [
                                         for (final reason in refundReasons)
-                                          DropdownMenuItem(
-                                            value: reason,
-                                            child: Text(reason),
-                                          ),
+                                          SelectItem(reason, reason),
                                       ],
+                                      value: _reason,
                                       onChanged: (value) => setState(
                                         () => _reason = value ?? _reason,
                                       ),
+                                      label: 'Reason',
                                     ),
                                   ),
                                   const SizedBox(width: 10),
@@ -587,15 +567,13 @@ class _VoidDialogState extends ConsumerState<_VoidDialog> {
             'no longer counts in reports. This cannot be undone.',
           ),
           const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            menuMaxHeight: 360,
-            initialValue: _reason,
-            decoration: const InputDecoration(labelText: 'Reason'),
+          AppSelect<String>(
             items: [
-              for (final reason in voidReasons)
-                DropdownMenuItem(value: reason, child: Text(reason)),
+              for (final reason in voidReasons) SelectItem(reason, reason),
             ],
+            value: _reason,
             onChanged: (value) => setState(() => _reason = value ?? _reason),
+            label: 'Reason',
           ),
           const SizedBox(height: 10),
           TextField(

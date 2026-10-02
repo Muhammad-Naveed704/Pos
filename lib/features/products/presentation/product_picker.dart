@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
+import '../../scanning/camera_scanner.dart';
 import '../data/product_repository.dart';
 
 /// Search-as-you-type product field for dialogs (inventory, purchases).
@@ -104,6 +105,7 @@ class _ProductPickerState extends ConsumerState<ProductPicker> {
       decoration: InputDecoration(
         labelText: widget.label,
         prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
+        suffixIcon: CameraScanButton(onScanned: _submit),
       ),
       onSubmitted: _submit,
     ),
