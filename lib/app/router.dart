@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
 import '../features/cashbook/presentation/cashbook_page.dart';
 import '../features/categories/presentation/categories_page.dart';
+import '../features/credit/presentation/customer_detail_page.dart';
+import '../features/credit/presentation/receivables_page.dart';
 import '../features/customers/presentation/customers_page.dart';
 import '../features/history/presentation/sales_history_page.dart';
 import '../features/inventory/presentation/inventory_page.dart';
@@ -17,11 +19,12 @@ import '../features/shell/presentation/module_page.dart';
 import '../features/stores/presentation/stores_page.dart';
 import '../features/users/presentation/users_page.dart';
 
-final _rootNavigatorKey = GlobalKey<NavigatorState>();
+/// Root navigator, for dialogs opened from services (printer picker).
+final rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final appRouter = GoRouter(
-  navigatorKey: _rootNavigatorKey,
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/dashboard',
   routes: [
     ShellRoute(
@@ -44,6 +47,19 @@ final appRouter = GoRouter(
         GoRoute(
           path: '/customers',
           builder: (context, state) => const CustomersPage(),
+          routes: [
+            GoRoute(
+              path: ':id',
+              builder: (context, state) =>
+                  CustomerDetailPage(customerId: state.pathParameters['id']!),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/receivables',
+          builder: (context, state) => ReceivablesPage(
+            overdueOnly: state.uri.queryParameters['filter'] == 'overdue',
+          ),
         ),
         GoRoute(
           path: '/history',

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/database/database_provider.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
+import '../../backup/application/backup_providers.dart';
 import '../../auth/domain/permissions.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../../../core/ui/import_dialog.dart';
@@ -297,7 +298,13 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         prepare: (table, update) =>
             service.prepare(session, table, updateExisting: update),
         previewOf: (plan) => plan.preview,
-        apply: (plan) => service.apply(session, plan),
+        apply: (plan) async {
+          // Safety backup first (if enabled in Data & backup).
+          await ref
+              .read(backupServiceProvider)
+              .beforeRiskyOperation(session, 'product import');
+          return service.apply(session, plan);
+        },
       ),
     );
     if (changed == true) _reload();

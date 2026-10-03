@@ -10,6 +10,7 @@ import '../../receipts/data/receipt_service.dart';
 import '../../receipts/presentation/receipt_preview.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/domain/credit.dart';
 import '../../returns/data/refund_service.dart';
 import '../../returns/presentation/refund_dialog.dart';
 import '../data/sales_repository.dart';
@@ -414,6 +415,15 @@ class _SaleRow extends StatelessWidget {
                   for (final method in item.paymentMethods.split(','))
                     if (method.trim().isNotEmpty)
                       StatusPill(method.trim().toUpperCase()),
+                  // Credit invoices show how far they are settled.
+                  if (sale.creditAmount > 0)
+                    StatusPill(
+                      PaymentStatus.label(sale.paymentStatus),
+                      tone: sale.paymentStatus == PaymentStatus.paid
+                          ? PillTone.success
+                          : PillTone.warning,
+                      icon: Icons.account_balance_wallet_outlined,
+                    ),
                 ],
               ),
             ),

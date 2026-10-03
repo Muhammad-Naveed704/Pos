@@ -158,9 +158,13 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
       final print = await confirmDialog(
         context,
         title: 'Refund ${result.number} recorded',
-        message:
-            '${money.format(result.amount)} refunded by ${(_method ?? state.primaryMethod).toUpperCase()}. '
-            'Print a refund slip for the customer?',
+        message: result.creditApplied.minorUnits > 0
+            ? '${money.format(result.amount)} returned: ${money.format(result.creditApplied)} '
+                  'taken off the unpaid balance'
+                  '${result.paidOut.minorUnits > 0 ? ' and ${money.format(result.paidOut)} paid back by ${(_method ?? state.primaryMethod).toUpperCase()}' : ''}. '
+                  'Print a refund slip for the customer?'
+            : '${money.format(result.amount)} refunded by ${(_method ?? state.primaryMethod).toUpperCase()}. '
+                  'Print a refund slip for the customer?',
         confirmLabel: 'Print slip',
         icon: Icons.check_circle_outline_rounded,
       );
@@ -454,6 +458,17 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
                                   color: context.colors.onErrorContainer,
                                 ),
                               ),
+                              if (state.outstanding.minorUnits > 0) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Unpaid balance ${money.format(state.outstanding)} is reduced first',
+                                  textAlign: TextAlign.end,
+                                  style: context.text.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: context.colors.onErrorContainer,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

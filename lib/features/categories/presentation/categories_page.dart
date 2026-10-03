@@ -45,8 +45,9 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage> {
           const SizedBox(height: 14),
           Expanded(
             child: Card(
-              child: StreamBuilder<List<Category>>(
-                stream: repository.watch(search: _search),
+              child: CachedStreamBuilder<List<Category>>(
+                keys: [_search],
+                create: () => repository.watch(search: _search),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());

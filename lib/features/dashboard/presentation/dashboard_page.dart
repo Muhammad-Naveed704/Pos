@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import '../../../core/money/money_format.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
+import '../../auth/domain/permissions.dart';
+import '../../credit/presentation/receivables_card.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../data/dashboard_metrics.dart';
 
@@ -25,7 +27,10 @@ class DashboardPage extends ConsumerWidget {
         ? 'Good afternoon'
         : 'Good evening';
     return RefreshIndicator(
-      onRefresh: () => ref.refresh(dashboardMetricsProvider.future),
+      onRefresh: () {
+        ref.invalidate(dashboardReceivablesProvider);
+        return ref.refresh(dashboardMetricsProvider.future);
+      },
       child: ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -36,7 +41,10 @@ class DashboardPage extends ConsumerWidget {
             actions: [
               IconButton.outlined(
                 tooltip: 'Refresh',
-                onPressed: () => ref.invalidate(dashboardMetricsProvider),
+                onPressed: () {
+                  ref.invalidate(dashboardMetricsProvider);
+                  ref.invalidate(dashboardReceivablesProvider);
+                },
                 icon: const Icon(Icons.refresh_rounded),
               ),
               FilledButton.icon(
@@ -65,6 +73,10 @@ class DashboardPage extends ConsumerWidget {
             ),
             data: (value) => _DashboardBody(metrics: value, money: money),
           ),
+          if (session.can(Permissions.creditView) && metrics.hasValue) ...[
+            const SizedBox(height: 16),
+            const ReceivablesCard().entrance(context, delay: 280),
+          ],
         ],
       ),
     );

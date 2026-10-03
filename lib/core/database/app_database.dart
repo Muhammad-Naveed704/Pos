@@ -154,6 +154,11 @@ class Sales extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
+  /// Amount left on account at checkout (schema v5): grand total minus what
+  /// was paid at the till. Immutable; settlements live in allocations.
+  RealColumn get creditAmount => real().withDefault(const Constant(0))();
+  DateTimeColumn get dueDate => dateTime().nullable()();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -191,6 +196,10 @@ class SaleRefunds extends Table {
   RealColumn get amount => real()();
   TextColumn get reason => text().withDefault(const Constant(''))();
   DateTimeColumn get createdAt => dateTime()();
+
+  /// Part of [amount] that reduced the invoice's unpaid balance instead of
+  /// being paid back (schema v5). Money handed back = amount - creditApplied.
+  RealColumn get creditApplied => real().withDefault(const Constant(0))();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -360,6 +369,67 @@ class BackupRecords extends Table {
   TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime()();
 
+  /// `manual`, `scheduled`, `safety` (schema v5).
+  TextColumn get kind => text().withDefault(const Constant('manual'))();
+  TextColumn get note => text().withDefault(const Constant(''))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// Money received from a customer against their account (schema v5).
+class CustomerPayments extends Table {
+  TextColumn get id => text()();
+  TextColumn get number => text().unique()();
+  TextColumn get customerId => text().references(Customers, #id)();
+  TextColumn get storeId => text().references(Stores, #id)();
+  TextColumn get userId => text().references(Users, #id)();
+  TextColumn get method => text()();
+  RealColumn get amount => real()();
+  TextColumn get reference => text().nullable()();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  TextColumn get cashSessionId =>
+      text().nullable().references(CashSessions, #id)();
+
+  /// `posted` or `reversed`.
+  TextColumn get status => text().withDefault(const Constant('posted'))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// Append-only customer account ledger (schema v5). Balance = debit - credit.
+class CustomerLedgerEntries extends Table {
+  TextColumn get id => text()();
+  TextColumn get customerId => text().references(Customers, #id)();
+  TextColumn get storeId => text().nullable().references(Stores, #id)();
+  TextColumn get userId => text().nullable().references(Users, #id)();
+
+  /// opening, sale, sale_payment, payment, payment_reversal, refund,
+  /// refund_paid, void, void_paid, adjustment.
+  TextColumn get type => text()();
+  TextColumn get referenceType => text().withDefault(const Constant(''))();
+  TextColumn get referenceId => text().nullable()();
+  TextColumn get referenceNumber => text().withDefault(const Constant(''))();
+  RealColumn get debit => real().withDefault(const Constant(0))();
+  RealColumn get credit => real().withDefault(const Constant(0))();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+/// How a customer payment was applied (schema v5). A null [saleId] means the
+/// customer's opening balance.
+class PaymentAllocations extends Table {
+  TextColumn get id => text()();
+  TextColumn get paymentId => text().references(CustomerPayments, #id)();
+  TextColumn get saleId => text().nullable().references(Sales, #id)();
+  RealColumn get amount => real()();
+  DateTimeColumn get createdAt => dateTime()();
+
   @override
   Set<Column<Object>> get primaryKey => {id};
 }
@@ -389,13 +459,16 @@ class BackupRecords extends Table {
     BackupRecords,
     SaleRefunds,
     SaleRefundItems,
+    CustomerPayments,
+    CustomerLedgerEntries,
+    PaymentAllocations,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? executor}) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -405,6 +478,7 @@ class AppDatabase extends _$AppDatabase {
       await _createPhaseTwoIndexes();
       await _createPhaseThreeIndexes();
       await _createPhaseFourIndexes();
+      await _createPhaseFiveIndexes();
     },
     onUpgrade: (migrator, from, to) async {
       if (from < 2) {
@@ -424,6 +498,31 @@ class AppDatabase extends _$AppDatabase {
         await migrator.createTable(saleRefunds);
         await migrator.createTable(saleRefundItems);
         await _createPhaseFourIndexes();
+      }
+      if (from < 5) {
+        await migrator.addColumn(sales, sales.creditAmount);
+        await migrator.addColumn(sales, sales.dueDate);
+        // Databases older than v4 just created sale_refunds with this column.
+        if (from >= 4) {
+          await migrator.addColumn(saleRefunds, saleRefunds.creditApplied);
+        }
+        await migrator.addColumn(backupRecords, backupRecords.kind);
+        await migrator.addColumn(backupRecords, backupRecords.note);
+        await migrator.createTable(customerPayments);
+        await migrator.createTable(customerLedgerEntries);
+        await migrator.createTable(paymentAllocations);
+        // Existing opening balances become the first ledger entry. Earlier
+        // sales were always paid in full, so they leave no balance.
+        await customStatement('''
+          INSERT INTO customer_ledger_entries
+            (id, customer_id, store_id, user_id, type, reference_type,
+             reference_id, reference_number, debit, credit, note, created_at)
+          SELECT 'opening-' || id, id, NULL, NULL, 'opening', 'customer', id,
+                 '', MAX(opening_balance, 0), MAX(-opening_balance, 0),
+                 'Opening balance', created_at
+          FROM customers WHERE opening_balance <> 0
+        ''');
+        await _createPhaseFiveIndexes();
       }
     },
     beforeOpen: (details) async {
@@ -493,6 +592,25 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_sale_refunds_sale ON sale_refunds(sale_id)',
       'CREATE INDEX IF NOT EXISTS idx_sale_refund_items_refund ON sale_refund_items(refund_id)',
       'CREATE INDEX IF NOT EXISTS idx_sale_refund_items_sale_item ON sale_refund_items(sale_item_id)',
+    ];
+    for (final statement in statements) {
+      await customStatement(statement);
+    }
+  }
+
+  Future<void> _createPhaseFiveIndexes() async {
+    const statements = [
+      'CREATE INDEX IF NOT EXISTS idx_ledger_customer_created ON customer_ledger_entries(customer_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_ledger_store_created ON customer_ledger_entries(store_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_ledger_reference ON customer_ledger_entries(reference_type, reference_id)',
+      'CREATE INDEX IF NOT EXISTS idx_customer_payments_customer_created ON customer_payments(customer_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_customer_payments_store_created ON customer_payments(store_id, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_customer_payments_status ON customer_payments(status)',
+      'CREATE INDEX IF NOT EXISTS idx_allocations_payment ON payment_allocations(payment_id)',
+      'CREATE INDEX IF NOT EXISTS idx_allocations_sale ON payment_allocations(sale_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sales_credit_due ON sales(customer_id, due_date) WHERE credit_amount > 0',
+      'CREATE INDEX IF NOT EXISTS idx_sales_store_payment_status ON sales(store_id, payment_status, created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_backup_records_created ON backup_records(created_at DESC)',
     ];
     for (final statement in statements) {
       await customStatement(statement);

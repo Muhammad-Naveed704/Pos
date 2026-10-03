@@ -10,6 +10,8 @@ import '../../../core/money/money.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/data/credit_ledger.dart';
+import '../../credit/domain/credit.dart';
 import '../../history/data/sales_repository.dart';
 
 final refundServiceProvider = Provider<RefundService>(
@@ -96,6 +98,8 @@ class SaleReturnState {
     required this.lines,
     required this.refunds,
     required this.refunded,
+    this.outstanding = Money.zero,
+    this.hasPayments = false,
   });
   final SaleDetails details;
   final List<RefundableLine> lines;
@@ -103,6 +107,12 @@ class SaleReturnState {
 
   /// Total already refunded (excluding voids).
   final Money refunded;
+
+  /// Unpaid credit balance of this invoice. Returns reduce it first.
+  final Money outstanding;
+
+  /// Whether customer payments were applied to this invoice.
+  final bool hasPayments;
 
   Sale get sale => details.summary.sale;
   Money get total => Money.fromMajor(sale.grandTotal);
@@ -115,7 +125,7 @@ class SaleReturnState {
 
   /// Voids are for same-day mistakes on untouched sales.
   bool get canVoid {
-    if (sale.saleStatus != SaleStatus.completed) return false;
+    if (sale.saleStatus != SaleStatus.completed || hasPayments) return false;
     final created = sale.createdAt.toLocal();
     final now = DateTime.now();
     return created.year == now.year &&
@@ -143,10 +153,21 @@ class RefundLineInput {
 }
 
 class RefundResult {
-  const RefundResult(this.refundId, this.number, this.amount);
+  const RefundResult(
+    this.refundId,
+    this.number,
+    this.amount, {
+    this.creditApplied = Money.zero,
+  });
   final String refundId;
   final String number;
   final Money amount;
+
+  /// Part of [amount] that reduced the invoice's unpaid balance.
+  final Money creditApplied;
+
+  /// Money actually handed back to the customer.
+  Money get paidOut => amount - creditApplied;
 }
 
 class RefundService {
@@ -202,7 +223,19 @@ class RefundService {
     final refunded = refunds
         .where((r) => r.refund.kind == 'refund')
         .fold(Money.zero, (sum, r) => sum + Money.fromMajor(r.refund.amount));
+    final allocated = await _database
+        .customSelect(
+          '''
+          SELECT COUNT(*) AS n FROM payment_allocations a
+          JOIN customer_payments cp ON cp.id = a.payment_id
+          WHERE a.sale_id = ? AND cp.status = 'posted'
+          ''',
+          variables: [Variable.withString(saleId)],
+        )
+        .getSingle();
     return SaleReturnState(
+      outstanding: await CreditLedger(_database).saleOutstanding(saleId),
+      hasPayments: allocated.read<int>('n') > 0,
       details: details,
       lines: [
         for (final item in details.items)
@@ -262,7 +295,7 @@ class RefundService {
     required String reason,
   }) async {
     PermissionGuard.require(session, Permissions.posRefund);
-    if (!_methods.contains(method)) {
+    if (!_methods.contains(method) && method != 'credit') {
       throw const RefundException('Choose how the money is returned.');
     }
     if (reason.trim().isEmpty) {
@@ -316,8 +349,18 @@ class RefundService {
       if (amount.minorUnits <= 0) {
         throw const RefundException('Nothing to refund.');
       }
+      // A return on an invoice that is not fully paid first reduces what the
+      // customer still owes; only the rest is handed back.
+      final applied = amount.compareTo(state.outstanding) > 0
+          ? state.outstanding
+          : amount;
+      final paidOut = amount - applied;
+      if (paidOut.minorUnits > 0 && method == 'credit') {
+        throw const RefundException('Choose how the money is returned.');
+      }
+      if (paidOut.minorUnits == 0) method = 'credit';
       final now = DateTime.now();
-      if (method == 'cash') await _checkDrawer(session, amount);
+      if (method == 'cash') await _checkDrawer(session, paidOut);
 
       final refundId = _uuid.v4();
       final count = state.refunds
@@ -336,6 +379,7 @@ class RefundService {
               kind: 'refund',
               method: method,
               amount: amount.majorUnits,
+              creditApplied: Value(applied.majorUnits),
               reason: Value(reason.trim()),
               createdAt: now,
             ),
@@ -373,7 +417,35 @@ class RefundService {
         }
       }
       if (method == 'cash') {
-        await _cashOut(session, amount, 'Cash refund $number', refundId, now);
+        await _cashOut(session, paidOut, 'Cash refund $number', refundId, now);
+      }
+      final customerId = state.sale.customerId;
+      if (customerId != null) {
+        final ledger = CreditLedger(_database, uuid: _uuid);
+        await ledger.entry(
+          customerId: customerId,
+          type: LedgerType.refund,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'refund',
+          referenceId: refundId,
+          referenceNumber: number,
+          credit: amount,
+          note: reason.trim(),
+          at: now,
+        );
+        await ledger.entry(
+          customerId: customerId,
+          type: LedgerType.refundPaid,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'refund',
+          referenceId: refundId,
+          referenceNumber: number,
+          debit: paidOut,
+          note: method.toUpperCase(),
+          at: now,
+        );
       }
       await _reverseLoyalty(state.sale.customerId, amount, now);
       final fullyReturned = state.lines.every((line) {
@@ -396,7 +468,7 @@ class RefundService {
         session,
         'sale.refunded',
         saleId,
-        'Refund $number of ${state.sale.invoiceNumber}: $amount by $method (${reason.trim()}).',
+        'Refund $number of ${state.sale.invoiceNumber}: $amount ($applied off the balance, $paidOut by $method) (${reason.trim()}).',
         json: jsonEncode({
           for (final (line, input, _) in planned)
             line.item.productNameSnapshot: {
@@ -405,7 +477,7 @@ class RefundService {
             },
         }),
       );
-      result = RefundResult(refundId, number, amount);
+      result = RefundResult(refundId, number, amount, creditApplied: applied);
     });
     return result;
   }
@@ -451,8 +523,13 @@ class RefundService {
               userId: session.user.id,
               number: number,
               kind: 'void',
-              method: methods.length == 1 ? methods.single : 'mixed',
+              method: methods.isEmpty
+                  ? 'credit'
+                  : methods.length == 1
+                  ? methods.single
+                  : 'mixed',
               amount: sale.grandTotal,
+              creditApplied: Value(state.outstanding.majorUnits),
               reason: Value(reason.trim()),
               createdAt: now,
             ),
@@ -497,6 +574,33 @@ class RefundService {
           now,
         );
       }
+      if (sale.customerId != null) {
+        final ledger = CreditLedger(_database, uuid: _uuid);
+        final total = Money.fromMajor(sale.grandTotal);
+        await ledger.entry(
+          customerId: sale.customerId!,
+          type: LedgerType.voidSale,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'refund',
+          referenceId: refundId,
+          referenceNumber: number,
+          credit: total,
+          note: reason.trim(),
+          at: now,
+        );
+        await ledger.entry(
+          customerId: sale.customerId!,
+          type: LedgerType.voidPaid,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'refund',
+          referenceId: refundId,
+          referenceNumber: number,
+          debit: total - state.outstanding,
+          at: now,
+        );
+      }
       await _reverseLoyalty(
         sale.customerId,
         Money.fromMajor(sale.grandTotal),
@@ -516,7 +620,12 @@ class RefundService {
         saleId,
         'Voided ${sale.invoiceNumber} (${reason.trim()}).',
       );
-      result = RefundResult(refundId, number, Money.fromMajor(sale.grandTotal));
+      result = RefundResult(
+        refundId,
+        number,
+        Money.fromMajor(sale.grandTotal),
+        creditApplied: state.outstanding,
+      );
     });
     return result;
   }
@@ -537,7 +646,7 @@ class RefundService {
     final row = await _database
         .customSelect(
           '''
-          SELECT ?2 + COALESCE(SUM(CASE WHEN type IN ('pay_out', 'cash_refund')
+          SELECT ?2 + COALESCE(SUM(CASE WHEN type IN ('pay_out', 'cash_refund', 'customer_refund')
                  THEN -amount ELSE amount END), 0.0) AS expected
           FROM cash_transactions WHERE session_id = ?1
           ''',

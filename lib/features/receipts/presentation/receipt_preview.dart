@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
 
+import '../../../core/printing/windows_printing.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../history/data/sales_repository.dart';
 import '../../settings/data/business_settings_repository.dart';
@@ -13,10 +15,9 @@ import '../data/receipt_service.dart';
 
 /// Renders PDF bytes as page images, sized for desktop dialogs.
 ///
-/// Rasterising runs on the platform (UI) thread on Windows, so it happens only
-/// when [bytes] changes (not on every rebuild, which `PdfPreview` does when
-/// given a new callback). The previous render stays visible while the next
-/// one is prepared.
+/// On Windows pages are rasterised with pdfium on a background isolate (the
+/// printing plugin does it on the window thread). Rendering happens only when
+/// [bytes] changes, and the previous render stays visible meanwhile.
 class ReceiptPdfView extends StatefulWidget {
   const ReceiptPdfView({required this.bytes, required this.paper, super.key});
 
@@ -66,9 +67,16 @@ class _ReceiptPdfViewState extends State<ReceiptPdfView> {
     final images = <ui.Image>[];
     try {
       final data = await source;
-      await for (final page in Printing.raster(data, dpi: _dpi)) {
-        if (!identical(_rendering, source)) break;
-        images.add(await page.toImage());
+      if (WindowsPrinting.available) {
+        for (final page in await WindowsPrinting.raster(data, _dpi)) {
+          if (!identical(_rendering, source)) break;
+          images.add(await _decode(page));
+        }
+      } else {
+        await for (final page in Printing.raster(data, dpi: _dpi)) {
+          if (!identical(_rendering, source)) break;
+          images.add(await page.toImage());
+        }
       }
     } catch (error) {
       if (mounted && identical(_rendering, source)) {
@@ -97,6 +105,18 @@ class _ReceiptPdfViewState extends State<ReceiptPdfView> {
     for (final image in old) {
       image.dispose();
     }
+  }
+
+  static Future<ui.Image> _decode(RasterPage page) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      page.bgra,
+      page.width,
+      page.height,
+      ui.PixelFormat.bgra8888,
+      completer.complete,
+    );
+    return completer.future;
   }
 
   @override

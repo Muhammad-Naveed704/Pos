@@ -21,15 +21,22 @@
    lookup, integer-money cart rules, line/sale discounts, price override, notes,
    persistent cart holds, customer selection, split tender, cash change, atomic
    checkout, stock/audit/cash/loyalty side effects, receipt/PDF and reprint.
-4. **Inventory and purchasing:** adjustments, receipts, returns and transfers with
-   mandatory movements, suppliers and low-stock workflow.
-5. **Customers, cashbook and history:** balances, loyalty, cash sessions, voids,
-   refunds and unified audit UI.
-6. **Reports and interchange:** paginated reports, charts, CSV/PDF/print export,
-   background CSV mapping/import/export.
-7. **Backup and recovery:** scheduled local archives, checksum validation, safety
-   snapshot and guarded restore.
-8. **Release hardening:** complete widget/integration suite, profiling, accessibility,
+4. **Inventory and purchasing (implemented):** adjustments, receipts, returns and
+   transfers with mandatory movements, suppliers and low-stock workflow.
+5. **Customers, cashbook and history (implemented):** loyalty, cash sessions,
+   voids, refunds.
+6. **Reports and interchange (implemented):** reports, charts, CSV/PDF/print
+   export, background CSV mapping/import/export.
+7. **Data safety, credit sales and customer ledger (implemented, schema v5):**
+   checksummed `.storeflowbackup` archives, verify, guarded restore with safety
+   backup and rollback, scheduled backups with retention; partial/credit
+   checkout, customer ledger, payments with explicit allocations, due dates,
+   credit limits with audited override, receivables dashboard and credit
+   reports, credit-aware refunds.
+8. **Supplier payables (next):** purchases on credit, supplier ledger and
+   payments, reusing the allocation pattern of customer accounts.
+9. **Translations:** Urdu/Arabic with RTL.
+10. **Release hardening:** complete widget/integration suite, profiling, accessibility,
    icon/privacy disclosures, MSIX metadata and signed Store validation.
 
 ## Primary risks

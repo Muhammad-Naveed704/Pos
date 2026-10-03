@@ -103,6 +103,15 @@ const moduleDefinitions = <ModuleDefinition>[
     permission: Permissions.customersView,
   ),
   ModuleDefinition(
+    path: '/receivables',
+    label: 'Receivables',
+    icon: Icons.request_quote_outlined,
+    selectedIcon: Icons.request_quote_rounded,
+    description: 'Customer balances, overdue invoices and payments.',
+    group: ModuleGroup.people,
+    permission: Permissions.creditView,
+  ),
+  ModuleDefinition(
     path: '/users',
     label: 'Users & roles',
     icon: Icons.manage_accounts_outlined,

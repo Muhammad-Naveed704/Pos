@@ -7,6 +7,9 @@ import '../../../core/database/database_provider.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/data/credit_ledger.dart';
+import '../../credit/data/credit_service.dart';
+import '../../credit/domain/credit.dart';
 
 final reportsServiceProvider = Provider<ReportsService>(
   (ref) => ReportsService(ref.watch(databaseProvider)),
@@ -24,7 +27,37 @@ enum ReportKind {
     Icons.local_shipping_outlined,
     Permissions.purchasesView,
   ),
-  stock('Stock valuation', Icons.warehouse_outlined, Permissions.inventoryView);
+  stock('Stock valuation', Icons.warehouse_outlined, Permissions.inventoryView),
+  customerBalances(
+    'Customer balances',
+    Icons.account_balance_wallet_outlined,
+    Permissions.creditView,
+  ),
+  creditSales(
+    'Credit sales',
+    Icons.request_quote_outlined,
+    Permissions.creditView,
+  ),
+  paymentsReceived(
+    'Payments received',
+    Icons.price_check_rounded,
+    Permissions.creditView,
+  ),
+  outstanding(
+    'Outstanding receivables',
+    Icons.pending_actions_rounded,
+    Permissions.creditView,
+  ),
+  overdue(
+    'Overdue receivables',
+    Icons.error_outline_rounded,
+    Permissions.creditView,
+  ),
+  statement(
+    'Customer statement',
+    Icons.description_outlined,
+    Permissions.customerStatement,
+  );
 
   const ReportKind(this.label, this.icon, this.permission);
   final String label;
@@ -32,7 +65,49 @@ enum ReportKind {
   final String permission;
 
   /// Whether the report depends on the selected date range.
-  bool get usesDates => this != stock;
+  bool get usesDates => !const {
+    ReportKind.stock,
+    ReportKind.customerBalances,
+    ReportKind.outstanding,
+    ReportKind.overdue,
+  }.contains(this);
+
+  /// Customer-account reports (shown in their own group, with filters).
+  bool get isCredit => index >= ReportKind.customerBalances.index;
+
+  bool get needsCustomer => this == ReportKind.statement;
+  bool get usesCashier => this == creditSales || this == paymentsReceived;
+  bool get usesMethod => this == paymentsReceived;
+  bool get usesStore => isCredit && this != statement;
+}
+
+/// Optional filters used by the customer-account reports.
+class ReportFilters {
+  const ReportFilters({
+    this.customerId,
+    this.cashierId,
+    this.method,
+    this.allStores = false,
+  });
+  final String? customerId;
+  final String? cashierId;
+  final String? method;
+
+  /// Customer accounts are business-wide; reports default to the active
+  /// store and can include every store on request.
+  final bool allStores;
+
+  ReportFilters copyWith({
+    String? Function()? customerId,
+    String? Function()? cashierId,
+    String? Function()? method,
+    bool? allStores,
+  }) => ReportFilters(
+    customerId: customerId == null ? this.customerId : customerId(),
+    cashierId: cashierId == null ? this.cashierId : cashierId(),
+    method: method == null ? this.method : method(),
+    allStores: allStores ?? this.allStores,
+  );
 }
 
 enum ColumnKind { text, integer, quantity, money, percent }
@@ -89,8 +164,9 @@ class ReportsService {
   Future<ReportResult> run(
     AppSession session,
     ReportKind kind,
-    DateTimeRange range,
-  ) async {
+    DateTimeRange range, {
+    ReportFilters filters = const ReportFilters(),
+  }) async {
     PermissionGuard.require(session, Permissions.reportsView);
     PermissionGuard.require(session, kind.permission);
     final from = DateTime(range.start.year, range.start.month, range.start.day);
@@ -105,7 +181,425 @@ class ReportsService {
       ReportKind.payments => _payments(session, from, to),
       ReportKind.purchases => _purchases(session, from, to),
       ReportKind.stock => _stock(session),
+      ReportKind.customerBalances => _customerBalances(session, filters),
+      ReportKind.creditSales => _creditSales(session, from, to, filters),
+      ReportKind.paymentsReceived => _paymentsReceived(
+        session,
+        from,
+        to,
+        filters,
+      ),
+      ReportKind.outstanding => _openInvoices(session, filters, false),
+      ReportKind.overdue => _openInvoices(session, filters, true),
+      ReportKind.statement => _statement(session, from, to, filters),
     };
+  }
+
+  static DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  String _storeClause(
+    AppSession session,
+    ReportFilters f,
+    String column,
+    List<Variable> vars,
+  ) {
+    if (f.allStores) return '1 = 1';
+    vars.add(Variable.withString(session.store.id));
+    return '$column = ?${vars.length}';
+  }
+
+  Future<ReportResult> _customerBalances(
+    AppSession session,
+    ReportFilters f,
+  ) async {
+    final vars = <Variable>[Variable.withDateTime(_today())];
+    final customer = f.customerId == null
+        ? ''
+        : 'AND c.id = ?${(vars..add(Variable.withString(f.customerId!))).length}';
+    final rows = await _database.customSelect('''
+      SELECT c.name, COALESCE(c.phone, '') AS phone, c.credit_limit, b.balance,
+        COALESCE((SELECT SUM($saleOutstandingSql) FROM sales s
+          WHERE s.customer_id = c.id AND s.credit_amount > 0
+            AND s.due_date IS NOT NULL AND s.due_date < ?1), 0.0) AS overdue,
+        (SELECT MIN(s.due_date) FROM sales s WHERE s.customer_id = c.id
+          AND s.credit_amount > 0 AND $saleOutstandingSql > 0.004) AS oldest_due,
+        c.is_active
+      FROM (SELECT customer_id, SUM(debit - credit) AS balance
+            FROM customer_ledger_entries GROUP BY customer_id) b
+      JOIN customers c ON c.id = b.customer_id
+      WHERE b.balance > 0.004 $customer
+      ORDER BY b.balance DESC
+      ''', variables: vars).get();
+    final total = rows.fold(0.0, (s, r) => s + r.read<double>('balance'));
+    final overdue = rows.fold(0.0, (s, r) => s + r.read<double>('overdue'));
+    return ReportResult(
+      kind: ReportKind.customerBalances,
+      kpis: [
+        ReportKpi('Total receivable', total, ColumnKind.money),
+        ReportKpi('Overdue', overdue, ColumnKind.money),
+        ReportKpi('Customers', rows.length.toDouble(), ColumnKind.integer),
+      ],
+      columns: const [
+        ReportColumn('Customer', ColumnKind.text, flex: 3),
+        ReportColumn('Phone', ColumnKind.text, flex: 2),
+        ReportColumn('Credit limit', ColumnKind.money),
+        ReportColumn('Outstanding', ColumnKind.money),
+        ReportColumn('Overdue', ColumnKind.money),
+        ReportColumn('Oldest due', ColumnKind.text),
+      ],
+      rows: [
+        for (final row in rows)
+          [
+            row.read<String>('name') +
+                (row.read<bool>('is_active') ? '' : ' (inactive)'),
+            row.read<String>('phone'),
+            row.read<double>('credit_limit'),
+            row.read<double>('balance'),
+            row.read<double>('overdue'),
+            _dueText(row.readNullable<DateTime>('oldest_due')),
+          ],
+      ],
+      chart: [
+        for (final row in rows.take(10))
+          (row.read<String>('name'), row.read<double>('balance')),
+      ],
+      chartLabel: 'Largest balances',
+      footnote: 'Customer accounts are shared by all stores. Balances come from the customer ledger.',
+    );
+  }
+
+  static String _dueText(DateTime? due) {
+    if (due == null) return 'No due date';
+    final local = due.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} '
+        '(${DueStatus.of(due).label})';
+  }
+
+  Future<ReportResult> _creditSales(
+    AppSession session,
+    DateTime from,
+    DateTime to,
+    ReportFilters f,
+  ) async {
+    final vars = <Variable>[
+      Variable.withDateTime(from),
+      Variable.withDateTime(to),
+    ];
+    final where = <String>[
+      's.credit_amount > 0',
+      "s.sale_status <> 'voided'",
+      's.created_at >= ?1',
+      's.created_at < ?2',
+      _storeClause(session, f, 's.store_id', vars),
+    ];
+    if (f.customerId != null) {
+      vars.add(Variable.withString(f.customerId!));
+      where.add('s.customer_id = ?${vars.length}');
+    }
+    if (f.cashierId != null) {
+      vars.add(Variable.withString(f.cashierId!));
+      where.add('s.user_id = ?${vars.length}');
+    }
+    final rows = await _database.customSelect('''
+      SELECT s.invoice_number, s.created_at, s.grand_total, s.credit_amount,
+             s.due_date, s.payment_status, COALESCE(c.name, '') AS customer,
+             u.display_name AS cashier, $saleOutstandingSql AS outstanding
+      FROM sales s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      JOIN users u ON u.id = s.user_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY s.created_at DESC, s.rowid DESC
+      ''', variables: vars).get();
+    double sum(String column) =>
+        rows.fold(0.0, (s, r) => s + r.read<double>(column));
+    return ReportResult(
+      kind: ReportKind.creditSales,
+      kpis: [
+        ReportKpi(
+          'Credit invoices',
+          rows.length.toDouble(),
+          ColumnKind.integer,
+        ),
+        ReportKpi('Invoice value', sum('grand_total'), ColumnKind.money),
+        ReportKpi('Put on account', sum('credit_amount'), ColumnKind.money),
+        ReportKpi(
+          'Still outstanding',
+          sum('outstanding'),
+          ColumnKind.money,
+          note: 'After payments and returns',
+        ),
+      ],
+      columns: const [
+        ReportColumn('Invoice', ColumnKind.text, flex: 2),
+        ReportColumn('Date', ColumnKind.text),
+        ReportColumn('Customer', ColumnKind.text, flex: 2),
+        ReportColumn('Cashier', ColumnKind.text),
+        ReportColumn('Total', ColumnKind.money),
+        ReportColumn('On account', ColumnKind.money),
+        ReportColumn('Outstanding', ColumnKind.money),
+        ReportColumn('Due', ColumnKind.text, flex: 2),
+      ],
+      rows: [
+        for (final row in rows)
+          [
+            row.read<String>('invoice_number'),
+            _day(row.read<DateTime>('created_at')),
+            row.read<String>('customer'),
+            row.read<String>('cashier'),
+            row.read<double>('grand_total'),
+            row.read<double>('credit_amount'),
+            _positive(row.read<double>('outstanding')),
+            row.read<double>('outstanding') > 0.004
+                ? _dueText(row.readNullable<DateTime>('due_date'))
+                : 'Settled',
+          ],
+      ],
+    );
+  }
+
+  static String _day(DateTime value) {
+    final local = value.toLocal();
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+  }
+
+  static double _positive(double value) => value < 0.005 ? 0 : value;
+
+  Future<ReportResult> _paymentsReceived(
+    AppSession session,
+    DateTime from,
+    DateTime to,
+    ReportFilters f,
+  ) async {
+    final vars = <Variable>[
+      Variable.withDateTime(from),
+      Variable.withDateTime(to),
+    ];
+    final where = <String>[
+      'cp.created_at >= ?1',
+      'cp.created_at < ?2',
+      _storeClause(session, f, 'cp.store_id', vars),
+    ];
+    if (f.customerId != null) {
+      vars.add(Variable.withString(f.customerId!));
+      where.add('cp.customer_id = ?${vars.length}');
+    }
+    if (f.cashierId != null) {
+      vars.add(Variable.withString(f.cashierId!));
+      where.add('cp.user_id = ?${vars.length}');
+    }
+    if (f.method != null) {
+      vars.add(Variable.withString(f.method!));
+      where.add('cp.method = ?${vars.length}');
+    }
+    final rows = await _database.customSelect('''
+      SELECT cp.number, cp.created_at, cp.method, cp.amount, cp.status,
+             COALESCE(cp.reference, '') AS reference,
+             c.name AS customer, u.display_name AS cashier
+      FROM customer_payments cp
+      JOIN customers c ON c.id = cp.customer_id
+      JOIN users u ON u.id = cp.user_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY cp.created_at DESC, cp.rowid DESC
+      ''', variables: vars).get();
+    final posted = rows.where((r) => r.read<String>('status') == 'posted');
+    final byMethod = <String, double>{};
+    for (final row in posted) {
+      final method = row.read<String>('method').toUpperCase();
+      byMethod[method] = (byMethod[method] ?? 0) + row.read<double>('amount');
+    }
+    return ReportResult(
+      kind: ReportKind.paymentsReceived,
+      kpis: [
+        ReportKpi(
+          'Received',
+          posted.fold(0.0, (s, r) => s + r.read<double>('amount')),
+          ColumnKind.money,
+        ),
+        ReportKpi('Payments', posted.length.toDouble(), ColumnKind.integer),
+        ReportKpi(
+          'Reversed',
+          (rows.length - posted.length).toDouble(),
+          ColumnKind.integer,
+        ),
+      ],
+      columns: const [
+        ReportColumn('Payment', ColumnKind.text, flex: 2),
+        ReportColumn('Date', ColumnKind.text),
+        ReportColumn('Customer', ColumnKind.text, flex: 2),
+        ReportColumn('Method', ColumnKind.text),
+        ReportColumn('Reference', ColumnKind.text),
+        ReportColumn('Received by', ColumnKind.text),
+        ReportColumn('Amount', ColumnKind.money),
+      ],
+      rows: [
+        for (final row in rows)
+          [
+            row.read<String>('number') +
+                (row.read<String>('status') == 'posted' ? '' : ' (reversed)'),
+            _day(row.read<DateTime>('created_at')),
+            row.read<String>('customer'),
+            row.read<String>('method').toUpperCase(),
+            row.read<String>('reference'),
+            row.read<String>('cashier'),
+            row.read<String>('status') == 'posted'
+                ? row.read<double>('amount')
+                : 0.0,
+          ],
+      ],
+      chart: [for (final e in byMethod.entries) (e.key, e.value)],
+      chartLabel: 'Received by method',
+    );
+  }
+
+  Future<ReportResult> _openInvoices(
+    AppSession session,
+    ReportFilters f,
+    bool overdueOnly,
+  ) async {
+    final today = _today();
+    final vars = <Variable>[Variable.withDateTime(today)];
+    final where = <String>[
+      's.credit_amount > 0',
+      '$saleOutstandingSql > 0.004',
+      _storeClause(session, f, 's.store_id', vars),
+      if (overdueOnly) 's.due_date IS NOT NULL AND s.due_date < ?1',
+    ];
+    if (f.customerId != null) {
+      vars.add(Variable.withString(f.customerId!));
+      where.add('s.customer_id = ?${vars.length}');
+    }
+    final rows = await _database.customSelect('''
+      SELECT s.invoice_number, s.created_at, s.due_date, s.grand_total,
+             COALESCE(c.name, '') AS customer, COALESCE(c.phone, '') AS phone,
+             $saleOutstandingSql AS outstanding
+      FROM sales s LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY COALESCE(s.due_date, s.created_at), s.rowid
+      ''', variables: vars).get();
+    // Aging by days past due (no due date counts as current).
+    const buckets = [
+      'Current',
+      '1–30 days',
+      '31–60 days',
+      '61–90 days',
+      '90+ days',
+    ];
+    final aging = {for (final b in buckets) b: 0.0};
+    final result = <List<Object>>[];
+    for (final row in rows) {
+      final due = row.readNullable<DateTime>('due_date');
+      final late = due == null ? 0 : today.difference(due.toLocal()).inDays;
+      final bucket = late <= 0
+          ? buckets[0]
+          : late <= 30
+          ? buckets[1]
+          : late <= 60
+          ? buckets[2]
+          : late <= 90
+          ? buckets[3]
+          : buckets[4];
+      final amount = row.read<double>('outstanding');
+      aging[bucket] = aging[bucket]! + amount;
+      result.add([
+        row.read<String>('invoice_number'),
+        row.read<String>('customer'),
+        _day(row.read<DateTime>('created_at')),
+        due == null ? 'No due date' : _day(due),
+        late > 0 ? late : 0,
+        amount,
+        DueStatus.of(due).label,
+      ]);
+    }
+    final total = aging.values.fold(0.0, (a, b) => a + b);
+    return ReportResult(
+      kind: overdueOnly ? ReportKind.overdue : ReportKind.outstanding,
+      kpis: [
+        ReportKpi(
+          overdueOnly ? 'Overdue' : 'Outstanding',
+          total,
+          ColumnKind.money,
+        ),
+        ReportKpi('Invoices', rows.length.toDouble(), ColumnKind.integer),
+        if (!overdueOnly)
+          ReportKpi('Overdue', total - aging[buckets[0]]!, ColumnKind.money),
+      ],
+      columns: const [
+        ReportColumn('Invoice', ColumnKind.text, flex: 2),
+        ReportColumn('Customer', ColumnKind.text, flex: 2),
+        ReportColumn('Date', ColumnKind.text),
+        ReportColumn('Due', ColumnKind.text),
+        ReportColumn('Days late', ColumnKind.integer),
+        ReportColumn('Outstanding', ColumnKind.money),
+        ReportColumn('Status', ColumnKind.text),
+      ],
+      rows: result,
+      chart: [
+        for (final b in buckets)
+          if (!overdueOnly || b != buckets[0]) (b, aging[b]!),
+      ],
+      chartLabel: 'Aging by days past due',
+      footnote:
+          'Invoices only. Opening balances are included in Customer balances.',
+    );
+  }
+
+  Future<ReportResult> _statement(
+    AppSession session,
+    DateTime from,
+    DateTime to,
+    ReportFilters f,
+  ) async {
+    final customerId = f.customerId;
+    if (customerId == null) {
+      return const ReportResult(
+        kind: ReportKind.statement,
+        columns: [ReportColumn('Choose a customer above', ColumnKind.text)],
+        rows: [],
+      );
+    }
+    final credit = CreditService(_database);
+    final page = await credit.ledger(session, customerId, from: from, to: to);
+    final balance = await credit.balance(session, customerId);
+    return ReportResult(
+      kind: ReportKind.statement,
+      kpis: [
+        ReportKpi('Opening balance', page.opening.majorUnits, ColumnKind.money),
+        ReportKpi('Charges', page.debit.majorUnits, ColumnKind.money),
+        ReportKpi(
+          'Payments & credits',
+          page.credit.majorUnits,
+          ColumnKind.money,
+        ),
+        ReportKpi('Closing balance', page.closing.majorUnits, ColumnKind.money),
+      ],
+      columns: const [
+        ReportColumn('Date', ColumnKind.text),
+        ReportColumn('Type', ColumnKind.text),
+        ReportColumn('Reference', ColumnKind.text, flex: 2),
+        ReportColumn('Debit', ColumnKind.money),
+        ReportColumn('Credit', ColumnKind.money),
+        ReportColumn('Balance', ColumnKind.money),
+        ReportColumn('User', ColumnKind.text),
+      ],
+      rows: [
+        for (final row in page.rows)
+          [
+            _day(row.entry.createdAt),
+            LedgerType.label(row.entry.type),
+            row.entry.referenceNumber,
+            row.debit.majorUnits,
+            row.credit.majorUnits,
+            row.balance.majorUnits,
+            row.userName ?? '',
+          ],
+      ],
+      footnote:
+          '${balance.customer.name}: credit limit ${balance.creditLimit}, '
+          'overdue now ${balance.overdue}. Positive balance = owed to the business.',
+    );
   }
 
   List<Variable> _vars(AppSession session, DateTime from, DateTime to) => [
@@ -542,11 +1036,23 @@ class ReportsService {
       FROM cash_transactions
       WHERE store_id = ?1 AND created_at >= ?2 AND created_at < ?3
       ''', variables: _vars(session, from, to)).getSingle();
+    // Only money actually handed back; the part of a return that reduced an
+    // unpaid credit balance is not a payment.
     final refundRows = await _database.customSelect('''
-      SELECT r.method AS method, COUNT(*) AS count, SUM(r.amount) AS amount
-      FROM sale_refunds r WHERE $_refundWhere
+      SELECT r.method AS method, COUNT(*) AS count, SUM(r.amount - r.credit_applied) AS amount
+      FROM sale_refunds r WHERE $_refundWhere AND r.amount - r.credit_applied > 0.004
       GROUP BY r.method ORDER BY amount DESC
       ''', variables: _vars(session, from, to)).get();
+    final accountRows = await _database.customSelect('''
+      SELECT cp.method AS method, COUNT(*) AS count, SUM(cp.amount) AS amount
+      FROM customer_payments cp
+      WHERE cp.store_id = ?1 AND cp.status = 'posted'
+        AND cp.created_at >= ?2 AND cp.created_at < ?3
+      GROUP BY cp.method ORDER BY amount DESC
+      ''', variables: _vars(session, from, to)).get();
+    final accountCash = accountRows
+        .where((row) => row.read<String>('method') == 'cash')
+        .fold(0.0, (sum, row) => sum + row.read<double>('amount'));
     final cashRefunds = refundRows
         .where((row) => row.read<String>('method') == 'cash')
         .fold(0.0, (sum, row) => sum + row.read<double>('amount'));
@@ -568,6 +1074,12 @@ class ReportsService {
           ColumnKind.money,
           note: 'Cash tendered minus change and cash refunds',
         ),
+        ReportKpi(
+          'Account payments (cash)',
+          accountCash,
+          ColumnKind.money,
+          note: 'Cash received against customer balances',
+        ),
         ReportKpi('Pay-ins', cashOut.read<double>('pay_in'), ColumnKind.money),
         ReportKpi(
           'Pay-outs',
@@ -586,6 +1098,12 @@ class ReportsService {
             row.read<String>('method').toUpperCase(),
             row.read<int>('count'),
             netOf(row),
+          ],
+        for (final row in accountRows)
+          [
+            'ACCOUNT PAYMENTS · ${row.read<String>('method').toUpperCase()}',
+            row.read<int>('count'),
+            row.read<double>('amount'),
           ],
         for (final row in refundRows)
           [

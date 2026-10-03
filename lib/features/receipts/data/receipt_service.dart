@@ -12,12 +12,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/money/currency.dart';
 import '../../../core/money/money_format.dart';
+import '../../../core/printing/windows_printing.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../history/data/sales_repository.dart';
 import '../../settings/domain/business_settings.dart';
 
+/// Asks the user which printer to use; returns the printer name or null to
+/// cancel. Overridden at bootstrap with the in-app picker dialog.
+typedef PrinterChooser = Future<String?> Function(
+  List<Printer> printers,
+  String? preferred,
+);
+
+final printerChooserProvider = Provider<PrinterChooser?>((ref) => null);
+
 final receiptServiceProvider = Provider<ReceiptService>(
-  (ref) => ReceiptService(ref.watch(sharedPreferencesProvider)),
+  (ref) => ReceiptService(
+    ref.watch(sharedPreferencesProvider),
+    chooser: ref.watch(printerChooserProvider),
+  ),
 );
 
 /// Printer choice is per computer, so it lives in SharedPreferences rather
@@ -29,8 +42,9 @@ class ReceiptPrinterPrefs {
 }
 
 class ReceiptService {
-  ReceiptService(this._prefs);
+  ReceiptService(this._prefs, {this._chooser});
   final SharedPreferences _prefs;
+  final PrinterChooser? _chooser;
 
   static const _printerKey = 'receipt.printerName';
   static const _directKey = 'receipt.directPrint';
@@ -51,6 +65,16 @@ class ReceiptService {
 
   Future<List<Printer>> printers() async {
     try {
+      if (WindowsPrinting.available) {
+        return [
+          for (final printer in await WindowsPrinting.listPrinters())
+            Printer(
+              url: printer.name,
+              name: printer.name,
+              isDefault: printer.isDefault,
+            ),
+        ];
+      }
       return await Printing.listPrinters();
     } catch (_) {
       return const [];
@@ -82,8 +106,39 @@ class ReceiptService {
     required String name,
     required ReceiptPaper paper,
   }) async {
-    final format = pageFormatFor(paper);
     final prefs = printerPrefs;
+    if (WindowsPrinting.available) {
+      // Spooling runs on a background isolate so a slow, busy or offline
+      // printer can never freeze the window.
+      var target = prefs.directPrint ? prefs.printerName : null;
+      if (target == null) {
+        final available = await printers();
+        if (available.isEmpty) {
+          throw const NativePrintException('No printer is installed.');
+        }
+        final chooser = _chooser;
+        target = chooser == null
+            ? (available.where((p) => p.isDefault).firstOrNull ??
+                      available.first)
+                  .name
+            : await chooser(available, prefs.printerName);
+        if (target == null) return;
+      }
+      await WindowsPrinting.printPdf(
+        printer: target,
+        documentName: name,
+        pdf: bytes,
+        rollPaper: paper.isRoll,
+        paperWidthMm: paper.widthMm,
+        paperSizeCode: switch (paper) {
+          ReceiptPaper.a4 => 9,
+          ReceiptPaper.a5 => 11,
+          _ => 0,
+        },
+      );
+      return;
+    }
+    final format = pageFormatFor(paper);
     if (prefs.directPrint && prefs.printerName != null) {
       final printer = (await printers())
           .where((item) => item.name == prefs.printerName)
@@ -210,6 +265,8 @@ class ReceiptData {
     required this.change,
     this.notes = '',
     this.status = 'completed',
+    this.balanceDue = 0,
+    this.dueDate,
   });
 
   factory ReceiptData.fromSale(SaleDetails details, BusinessSettings s) {
@@ -258,6 +315,8 @@ class ReceiptData {
       change: sale.changeAmount,
       notes: sale.notes,
       status: sale.saleStatus,
+      balanceDue: sale.creditAmount,
+      dueDate: sale.dueDate,
     );
   }
 
@@ -403,6 +462,10 @@ class ReceiptData {
   final double change;
   final String notes;
   final String status;
+
+  /// Left on the customer account at checkout (credit sales).
+  final double balanceDue;
+  final DateTime? dueDate;
 }
 
 // ---------------------------------------------------------------------------
@@ -692,6 +755,10 @@ pw.Widget _rollBody(_Ctx c) {
       for (final payment in d.payments)
         _row(_paidLabel(payment.method), c.money.major(payment.amount), c.text),
       if (d.change > 0) _row('Change', c.money.major(d.change), c.bold),
+      if (d.balanceDue > 0)
+        _row('Balance due', c.money.major(d.balanceDue), c.bold),
+      if (d.balanceDue > 0 && d.dueDate != null)
+        _row('Due date', DateFormat('d MMM y').format(d.dueDate!), c.text),
       if (d.notes.isNotEmpty) ...[
         _dashed(),
         pw.Text('Note: ${d.notes}', style: c.small),
@@ -912,6 +979,14 @@ List<pw.Widget> _invoiceBody(_Ctx c) {
                   c.text,
                 ),
               if (d.change > 0) _row('Change', c.money.major(d.change), c.text),
+              if (d.balanceDue > 0)
+                _row('Balance due', c.money.major(d.balanceDue), c.bold),
+              if (d.balanceDue > 0 && d.dueDate != null)
+                _row(
+                  'Due date',
+                  DateFormat('d MMM y').format(d.dueDate!),
+                  c.text,
+                ),
             ],
           ),
         ),

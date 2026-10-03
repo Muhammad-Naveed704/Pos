@@ -49,11 +49,18 @@ implemented. The current usable scope is:
 - Sale returns/refunds (partial or full, per-line restock choice, cash/card/
   bank/other) and same-day voids, with refund slips
 - USB barcode scanner capture on the POS even when search is not focused
+- Backup/restore: checksummed `.storeflowbackup` files, verify, guarded
+  restore with safety backup and rollback, scheduled backups with retention
+- Credit (udhaar) sales: Pay in full / Partial / Credit at checkout, due dates,
+  credit limits with audited override, customer ledger, payments with explicit
+  oldest-first or manual allocation, payment reversal, due-date changes
+- Customer detail screen (overview, invoices, ledger, payments, statement),
+  Receivables page and dashboard card, six credit reports
 
 Not implemented yet (do not describe as done):
 
-- Backup/restore workflow
-- Customer credit sales and supplier payables/balances
+- Supplier payables/balances (purchases are still paid in full)
+- Customer advances/credit notes (overpayment is blocked)
 - UI translations (all text is English)
 
 The database already contains supporting tables/permissions for some future
@@ -80,6 +87,8 @@ modules. Their presence does not mean their workflows are complete.
   with `flutter_zxing` (zxing-cpp via FFI; EAN/UPC/Code 128/QR). zxing-cpp is
   compiled with MSVC/CMake on the first Windows build (slow once).
 - Date-range calendar: `calendar_date_picker2` (MIT)
+- Backups: `archive` (zip container) + `crypto` (SHA-256), both already in the
+  lock file as transitive dependencies before they were made direct
 
 UI building blocks live in `lib/core/ui/` (exported by `ui_kit.dart`). Use
 `AppSelect` (Material 3 `DropdownMenu`, searchable, follows value changes),
@@ -183,7 +192,11 @@ method must repeat its permission check even when its button/route is hidden.
 - `/inventory` — stock, adjustments, counts, transfers, movement ledger
 - `/purchases` — receiving, supplier returns, suppliers
 - `/cashbook` — cash sessions, pay-ins/outs, closing count
-- `/reports` — sales/profit/payment/purchase/stock reports with export
+- `/reports` — sales/profit/payment/purchase/stock reports and customer-account
+  reports (balances, credit sales, payments received, outstanding with aging,
+  overdue, statement) with export
+- `/customers/:id` — customer account: overview, invoices, ledger, payments
+- `/receivables` — business-wide balances (`?filter=overdue`)
 
 `ModuleDefinition.planned` still exists for future placeholder modules; a
 module with a non-empty `planned` list is routed to `ModulePage`.
@@ -213,9 +226,9 @@ The connection enables:
 - 5-second busy timeout
 - Drift/sqlite3 prepared-statement reuse
 
-Current schema version: **4**.
+Current schema version: **5**.
 
-The 23 tables are:
+The 26 tables are:
 
 1. `stores`
 2. `roles`
@@ -240,6 +253,9 @@ The 23 tables are:
 21. `backup_records`
 22. `sale_refunds`
 23. `sale_refund_items`
+24. `customer_payments`
+25. `customer_ledger_entries`
+26. `payment_allocations`
 
 Version 1 created all tables and the base lookup/history indexes. Version 2 adds
 non-destructive indexes for scoped settings, users/store status, category trees,
@@ -247,7 +263,12 @@ exact barcode/SKU lookup, held carts, and payment methods. Version 3 adds
 `sale_items.unit_cost` (cost snapshot at sale time, backfilled from the current
 product cost for older sales) and indexes for stock ledgers, purchases, cash
 sessions and sale-item product lookups. Version 4 adds `sale_refunds` and
-`sale_refund_items` with their indexes.
+`sale_refund_items` with their indexes. Version 5 adds `sales.credit_amount`,
+`sales.due_date`, `sale_refunds.credit_applied`, `backup_records.kind/note`,
+the three customer-account tables, an `opening` ledger row for every customer
+with a non-zero opening balance, and indexes on customer/sale/payment/store/
+created_at/due_date/status. (The v5 branch only adds `credit_applied` when
+upgrading from v4; older databases create `sale_refunds` with it.)
 
 **Dates are stored as unix seconds.** Drift's default DateTime storage is an
 INTEGER, so SQL date functions must use the `'unixepoch'` modifier, e.g.
@@ -323,6 +344,64 @@ Settings involved in checkout:
 
 Permission and setting checks are both required for discount/price overrides.
 
+## Customer accounts (credit) and ledger
+
+- `customer_ledger_entries` is append-only. Balance = SUM(debit - credit);
+  positive means the customer owes money. There is no stored balance column.
+- Every sale with a named customer writes `sale` (debit total) and
+  `sale_payment` (credit of what was paid now), so paid sales net to zero.
+  Other types: `opening`/`adjustment` (opening-balance edits through
+  `CreditLedger.syncOpeningBalance`), `payment`, `payment_reversal`, `refund`,
+  `refund_paid`, `void`, `void_paid`.
+- `sales.credit_amount` is the immutable amount left on account at checkout.
+  Invoice outstanding = credit_amount − posted allocations − refunds'
+  `credit_applied` (`saleOutstandingSql`). `sales.payment_status` is
+  `paid`/`partial`/`credit` and is re-derived after payments, reversals and
+  returns. Invariant: grand_total = (paid − change) + credit_amount.
+- Partial/credit checkout needs `credit.create` and a named, active customer
+  (walk-in sales must be paid in full). The limit check is
+  ledger balance + new credit ≤ credit_limit; a limit of 0 means no credit
+  without an override. `credit.override_limit` lets the POS retry after a
+  confirmation and writes `credit.limit_override`.
+- `CreditService.receivePayment` (`credit.receive_payment`) rejects amounts
+  above what is owed (no advances). Allocations are stored explicitly in
+  `payment_allocations` (null `sale_id` = opening balance), oldest first by
+  default or manual. Cash payments add a `customer_payment` cash transaction
+  (counted with pay-ins); reversals add `customer_refund` (an outflow).
+- Due status (`DueStatus`): overdue when the due date is before today, due soon
+  within 3 days, else current; always shown with text and an icon.
+- Customer accounts are business-wide (a customer can buy in one branch and
+  pay in another), so balances/receivables are not store-filtered; credit
+  reports default to the active store with an "All stores" option.
+- Refund rule: a return first reduces the invoice's unpaid balance
+  (`credit_applied`); only the rest is paid back (method `credit` when nothing
+  is paid out). Cash drawer checks use the paid-out part. Voids are blocked
+  once a customer payment was allocated to the sale.
+
+## Backup and restore
+
+- `BackupService` (`lib/features/backup/data/backup_service.dart`): the
+  snapshot is `VACUUM INTO` (consistent under WAL while the app writes), the
+  copy is integrity-checked, then zipped with `manifest.json` (app/schema
+  version, stores, per-entry SHA-256 and size), per-PC preferences (`theme.*`,
+  `receipt.*`, `shell.*`) and any existing product image / receipt logo files.
+  The written file is re-read and verified before a `verified`
+  `backup_records` row is written; failures write a `failed` row only.
+  Packing and verification run in isolates via top-level helpers (closures
+  must not capture the database).
+- Restore (`backup.restore`): inspect → confirm (type RESTORE) → safety backup
+  (must succeed) → close DB → move live files to `.rollback-*` → copy → reopen
+  through `DatabaseHost.openDatabase` (migrations run) → integrity check. On
+  failure the previous files are put back and `RestoreFailedException`
+  carries the reopened database. Success replaces the database in
+  `DatabaseHost`, which rebuilds the provider scope (everyone signs in again).
+- Backups newer than the app's schema/format are rejected. Scheduled backups
+  (`backup.*` app settings, `backup.settings`) run from `AppShell` while
+  signed in; retention deletes only recorded, StoreFlow-named scheduled
+  backups in the configured folder. Safety backups go to
+  `<app support>/StoreFlow POS/safety-backups` and also run before CSV imports
+  when enabled.
+
 ## Authentication and sessions
 
 Passwords use PBKDF2-HMAC-SHA256 with random 128-bit salts, 210,000 iterations,
@@ -349,7 +428,12 @@ Permission constants live only in
 `lib/features/auth/domain/permissions.dart`, with human-readable labels in
 `PermissionCatalog`. Reuse constants rather than typing permission strings
 elsewhere. Families cover POS, products, customers, inventory, purchases,
-cashbook, reports, users, and settings.
+cashbook, reports, users, settings, credit and backup.
+
+Version 3 added `credit.view`, `credit.create`, `credit.receive_payment`,
+`credit.override_limit`, `credit.edit_due_date`, `customer.statement`,
+`backup.create`, `backup.restore` and `backup.settings`
+(`settings.backup_restore` now only opens the Data & backup tab).
 
 The Owner (built-in role named `Owner`) resolves to `Permissions.all` at
 sign-in, so new permissions reach it automatically. When adding permissions,
@@ -402,6 +486,11 @@ Do not ship seed/demo records in this path. Test fixtures may create isolated da
 - `CashbookService`: drawer sessions, pay-ins/outs, closing count
 - `ReportsService`: date-ranged reports returning a uniform `ReportResult`
 - `RefundService`: sale returns/refunds, voids, refund history
+- `CreditLedger`: low-level ledger/outstanding helpers used inside other
+  services' transactions
+- `CreditService`: balances, invoices, ledger, payments, allocation, reversal,
+  due dates, receivables
+- `BackupService`: backup create/verify/inspect/restore, schedule, retention
 
 ## POS behavior
 
@@ -417,8 +506,10 @@ The POS page is the highest-priority interaction surface:
 - Held carts are database-persistent, do not change stock, revalidate on restore,
   and require confirmation before deletion.
 - Payment methods: cash, card, bank, other; split tenders are supported.
-- Underpayment is blocked. Change cannot exceed cash tendered. Credit sale is not
-  implemented.
+- Underpayment is blocked in Pay in full mode. Change cannot exceed cash
+  tendered. Partial/Credit modes (with `credit.create`) need a customer, show
+  paid now / remaining / due date (today, 7, 15, 30 days, custom or none).
+- Ctrl+Shift+P — receive a customer payment (anywhere in the shell).
 
 Keyboard bindings:
 
@@ -498,6 +589,11 @@ Before/during its single Drift transaction it:
 11. Inserts the audit log.
 12. Advances the invoice sequence.
 
+For partial/credit sales the same transaction also checks the customer and
+credit limit, stores `credit_amount`/`due_date`, writes the customer ledger
+rows (every named-customer sale does) and the `credit.sale` /
+`credit.limit_override` audit rows.
+
 Any exception must roll back every write. Never move one of these writes outside
 the transaction. The `_transactionProbe` constructor seam exists only for rollback
 testing.
@@ -530,6 +626,16 @@ A4/A5 use `MultiPage` with a tabular invoice. Windows Segoe UI (with Nirmala UI
 fallback) is loaded from the Windows fonts folder so Unicode currency symbols
 print; without it the ISO code is used. Printer choice and direct printing are
 per-PC SharedPreferences, not business settings.
+
+Printing never goes through the `printing` plugin on Windows: the plugin
+lists printers, spools the job and rasterises on the window (platform)
+thread, so a slow or offline printer showed "Not Responding".
+`WindowsPrinting` (`lib/core/printing/windows_printing.dart`) does the same
+with dart:ffi (winspool level-4 enumeration, GDI, bundled `pdfium.dll`) on
+background isolates, with PDFium calls queued. Without a printer saved for
+direct printing the in-app picker (`printer_picker.dart`) asks once, with an
+"always print here" option. The plugin remains only as a fallback when
+pdfium.dll is missing. `tool/printing_probe.dart` checks the bindings.
 
 Previews use `ReceiptPdfView`, not `PdfPreview`. On Windows, PDF rasterising
 runs on the UI thread (~0.3–0.6 s for A4), and `PdfPreview` re-rasterises
@@ -567,10 +673,22 @@ used. Current coverage includes:
   legacy theme-preference migration
 - AppSelect value-follow regression, AppSegmented, date presets, EAN-13
 - Cash figures net of change (payment mix and payment-method report)
+- Credit: zero-payment and partial sales, unchanged full payment, customer and
+  permission required, limit and audited override, oldest-first and manual
+  allocation, overpayment blocked, reversal, overdue/receivables, opening
+  balance edits, credit reports, rollback of credit checkout and of payments,
+  returns reducing the balance first, credit voids
+- Backup: create + checksums + metadata, damaged and newer-version files
+  rejected, restore with safety backup, failed restore rollback, WAL
+  consistency, schedule and retention (user files untouched), v4→v5 migration
+- Payment dialog modes (widget)
 - 1280×720 Dashboard → POS → Settings → Sales History smoke navigation
 
 Visual QA: `flutter test tool/screens_test.dart --dart-define=SHOTS=<dir>
---dart-define=MODE=light|dark` renders the main pages with real Windows fonts
+--dart-define=MODE=light|dark --dart-define=SIZE=1280x720` renders the main
+pages (including customer detail/ledger, receive payment, receivables, credit
+checkout, receivables report, backup and restore confirmation) as the Windows
+platform with real Windows fonts
 and saves PNGs. It is not part of the suite (it needs Windows fonts); it may
 hang on teardown after writing the images, which is harmless.
 
@@ -578,7 +696,7 @@ Last verified before this handoff:
 
 - `dart format .` — clean
 - `flutter analyze` — zero issues
-- `flutter test` — 74 tests passed
+- `flutter test` — 99 tests passed
 - Windows release build — passed at the current root
 
 Always repeat format, analyze, tests, and release build after material changes.
@@ -587,10 +705,9 @@ Always repeat format, analyze, tests, and release build after material changes.
 
 The intended next phases are:
 
-1. Customer credit sales and supplier payables
-2. Checksum-verified backup/restore with safety snapshots
-3. UI translations (Urdu/Arabic with RTL)
-4. Release packaging, accessibility/profile hardening, then MSIX/signing
+1. Supplier payables (purchases on credit, supplier ledger and payments)
+2. UI translations (Urdu/Arabic with RTL)
+3. Release packaging, accessibility/profile hardening, then MSIX/signing
 
 Do not begin several phases in one unreviewable change. Build vertical slices with
 domain rules, service transaction, repository queries, desktop UI, and tests.
@@ -604,7 +721,11 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
 - Do not bypass repository/service permission checks.
 - Do not issue cross-store queries without an explicit reason and test.
 - Do not update stock without a stock movement in the same transaction.
-- Do not split checkout/void/refund/purchase multi-table writes across transactions.
+- Do not split checkout/void/refund/purchase/customer-payment multi-table writes
+  across transactions.
+- Never store a customer balance; derive it from `customer_ledger_entries`, and
+  write a ledger row in the same transaction as anything that changes what a
+  customer owes. Record payment allocations explicitly.
 - Never filter "real" sales with `sale_status = 'completed'`; use
   `sale_status <> 'voided'` and subtract refunds (see Returns section).
 - Do not use raw `double` arithmetic for new financial domain logic.
@@ -615,8 +736,10 @@ domain rules, service transaction, repository queries, desktop UI, and tests.
   `DropdownButtonFormField`s (they read `initialValue` once) when their data
   can be reloaded.
 - Do not call a repository future or create a Drift `watch()` stream inside
-  `build()`; cache it in state and rebind only when a filter changes
-  (a new stream instance makes `StreamBuilder` resubscribe and flicker).
+  `build()`; use `CachedStreamBuilder(create:, keys:)` or cache it in state
+  (a new stream re-runs the query on every rebuild, e.g. each POS cart tap).
+- Never block the window thread: no synchronous plugin calls for printing;
+  CPU-heavy work (PBKDF2 hashing, PDF, CSV, backups) runs in isolates.
 - Order ledgers and lists by `created_at` and then `rowid`; timestamps have
   one-second precision.
 - Payments store the amount tendered. Any cash total must subtract

@@ -6,6 +6,7 @@ import '../theme/app_tokens.dart';
 
 export '../theme/app_tokens.dart' show AppThemeContext, AppTokens;
 export 'brand_mark.dart';
+export 'cached_stream_builder.dart';
 export 'inputs.dart';
 
 /// Standard page title row with optional subtitle and trailing actions.

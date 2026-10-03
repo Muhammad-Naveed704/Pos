@@ -719,8 +719,9 @@ class _HeldCarts extends ConsumerWidget {
       content: SizedBox(
         width: 620,
         height: 420,
-        child: StreamBuilder<List<HeldCart>>(
-          stream: repository.watch(session),
+        child: CachedStreamBuilder<List<HeldCart>>(
+          keys: [session.store.id, session.user.id],
+          create: () => repository.watch(session),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
@@ -861,8 +862,20 @@ Future<SaleCompleteAction?> showSaleCompleteDialog(
                 children: [
                   _Summary('Total', money.format(result.total)),
                   _Summary('Received', money.format(result.received)),
+                  if (result.isCredit)
+                    _Summary('On account', money.format(result.outstanding)),
                 ],
               ),
+              if (result.isCredit) ...[
+                const SizedBox(height: 14),
+                StatusPill(
+                  result.dueDate == null
+                      ? 'Credit sale · no due date'
+                      : 'Credit sale · due ${DateFormat('d MMM y').format(result.dueDate!)}',
+                  tone: PillTone.warning,
+                  icon: Icons.account_balance_wallet_outlined,
+                ),
+              ],
             ],
           ),
         ),

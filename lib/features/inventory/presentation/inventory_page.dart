@@ -946,8 +946,8 @@ class _TransferDialogState extends ConsumerState<_TransferDialog> {
                 ],
               ),
               const SizedBox(height: 16),
-              StreamBuilder(
-                stream: ref.watch(storeRepositoryProvider).watchAll(),
+              CachedStreamBuilder(
+                create: ref.read(storeRepositoryProvider).watchAll,
                 builder: (context, snapshot) {
                   final stores = (snapshot.data ?? const [])
                       .where((s) => s.isActive && s.id != session.store.id)

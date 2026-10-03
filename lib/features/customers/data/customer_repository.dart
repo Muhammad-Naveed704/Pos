@@ -7,10 +7,29 @@ import '../../../core/database/database_provider.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/data/credit_ledger.dart';
 
 final customerRepositoryProvider = Provider<CustomerRepository>(
   (ref) => CustomerRepository(ref.watch(databaseProvider)),
 );
+
+/// Live account balance per customer id (customers who have ledger rows).
+final customerBalancesProvider = StreamProvider<Map<String, double>>((ref) {
+  final database = ref.watch(databaseProvider);
+  return database
+      .customSelect(
+        'SELECT customer_id, SUM(debit - credit) AS balance '
+        'FROM customer_ledger_entries GROUP BY customer_id',
+        readsFrom: {database.customerLedgerEntries},
+      )
+      .watch()
+      .map(
+        (rows) => {
+          for (final row in rows)
+            row.read<String>('customer_id'): row.read<double>('balance'),
+        },
+      );
+});
 
 class CustomerSummary {
   const CustomerSummary({
@@ -75,26 +94,49 @@ class CustomerRepository {
       session,
       id == null ? Permissions.customersCreate : Permissions.customersEdit,
     );
+    if (name.trim().isEmpty) throw ArgumentError('Customer name is required.');
+    if (creditLimit < 0) {
+      throw ArgumentError('The credit limit cannot be negative.');
+    }
     final customerId = id ?? _uuid.v4();
     final now = DateTime.now();
-    await _database
-        .into(_database.customers)
-        .insertOnConflictUpdate(
-          CustomersCompanion.insert(
-            id: customerId,
-            name: name.trim(),
-            phone: Value(phone?.trim().isEmpty == true ? null : phone?.trim()),
-            email: Value(email?.trim().isEmpty == true ? null : email?.trim()),
-            address: Value(address.trim()),
-            notes: Value(notes.trim()),
-            loyaltyPoints: Value(loyaltyPoints),
-            creditLimit: Value(creditLimit),
-            openingBalance: Value(openingBalance),
-            isActive: Value(isActive),
-            createdAt: now,
-            updatedAt: now,
-          ),
-        );
+    await _database.transaction(() async {
+      final current = id == null
+          ? null
+          : await (_database.select(
+              _database.customers,
+            )..where((row) => row.id.equals(id))).getSingleOrNull();
+      await _database
+          .into(_database.customers)
+          .insertOnConflictUpdate(
+            CustomersCompanion.insert(
+              id: customerId,
+              name: name.trim(),
+              phone: Value(
+                phone?.trim().isEmpty == true ? null : phone?.trim(),
+              ),
+              email: Value(
+                email?.trim().isEmpty == true ? null : email?.trim(),
+              ),
+              address: Value(address.trim()),
+              notes: Value(notes.trim()),
+              loyaltyPoints: Value(loyaltyPoints),
+              creditLimit: Value(creditLimit),
+              openingBalance: Value(openingBalance),
+              isActive: Value(isActive),
+              createdAt: current?.createdAt ?? now,
+              updatedAt: now,
+            ),
+          );
+      await CreditLedger(_database, uuid: _uuid).syncOpeningBalance(
+        customerId: customerId,
+        previous: current?.openingBalance ?? 0,
+        next: openingBalance,
+        storeId: session.store.id,
+        userId: session.user.id,
+        at: now,
+      );
+    });
     return customerId;
   }
 

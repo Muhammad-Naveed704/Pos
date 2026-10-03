@@ -9,6 +9,7 @@ import '../../../core/database/database_provider.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/data/credit_ledger.dart';
 
 final customerImportServiceProvider = Provider<CustomerImportService>(
   (ref) => CustomerImportService(ref.watch(databaseProvider)),
@@ -228,11 +229,12 @@ class CustomerImportService {
             : await (_database.select(
                 _database.customers,
               )..where((c) => c.id.equals(row.existingId!))).getSingle();
+        final customerId = row.existingId ?? _uuid.v4();
         await _database
             .into(_database.customers)
             .insertOnConflictUpdate(
               CustomersCompanion.insert(
-                id: row.existingId ?? _uuid.v4(),
+                id: customerId,
                 name: row.name,
                 phone: Value(row.phone ?? current?.phone),
                 email: Value(row.email ?? current?.email),
@@ -252,6 +254,14 @@ class CustomerImportService {
                 updatedAt: now,
               ),
             );
+        await CreditLedger(_database, uuid: _uuid).syncOpeningBalance(
+          customerId: customerId,
+          previous: current?.openingBalance ?? 0,
+          next: row.openingBalance ?? current?.openingBalance ?? 0,
+          storeId: session.store.id,
+          userId: session.user.id,
+          at: now,
+        );
         if (row.existingId == null) {
           created++;
         } else {

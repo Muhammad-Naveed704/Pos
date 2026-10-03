@@ -9,6 +9,7 @@ import '../../../core/theme/theme_settings.dart';
 import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
+import '../../backup/presentation/backup_settings.dart';
 import '../../pos/domain/pos_cart.dart';
 import '../data/business_settings_repository.dart';
 import '../domain/business_settings.dart';
@@ -20,11 +21,16 @@ class SettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final canManage = ref
-        .watch(activeSessionProvider)!
-        .can(Permissions.settingsManage);
+    final session = ref.watch(activeSessionProvider)!;
+    final canManage = session.can(Permissions.settingsManage);
+    final canBackup = [
+      Permissions.settingsBackup,
+      Permissions.backupCreate,
+      Permissions.backupRestore,
+      Permissions.backupSettings,
+    ].any(session.can);
     return DefaultTabController(
-      length: canManage ? 5 : 1,
+      length: (canManage ? 5 : 1) + (canBackup ? 1 : 0),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
         child: Column(
@@ -58,6 +64,11 @@ class SettingsPage extends ConsumerWidget {
                   ),
                   Tab(icon: Icon(Icons.security_rounded), text: 'Security'),
                 ],
+                if (canBackup)
+                  const Tab(
+                    icon: Icon(Icons.backup_rounded),
+                    text: 'Data & backup',
+                  ),
               ],
             ),
             Expanded(
@@ -70,6 +81,7 @@ class SettingsPage extends ConsumerWidget {
                     ReceiptDesigner(),
                     SecuritySettings(),
                   ],
+                  if (canBackup) const BackupSettingsTab(),
                 ],
               ),
             ),

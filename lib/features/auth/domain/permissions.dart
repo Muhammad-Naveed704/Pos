@@ -32,10 +32,19 @@ abstract final class Permissions {
   static const cashbookView = 'cashbook.view';
   static const cashbookManage = 'cashbook.manage';
   static const reportsExport = 'reports.export';
+  static const creditView = 'credit.view';
+  static const creditCreate = 'credit.create';
+  static const creditReceivePayment = 'credit.receive_payment';
+  static const creditOverrideLimit = 'credit.override_limit';
+  static const creditEditDueDate = 'credit.edit_due_date';
+  static const customerStatement = 'customer.statement';
+  static const backupCreate = 'backup.create';
+  static const backupRestore = 'backup.restore';
+  static const backupSettings = 'backup.settings';
 
   /// Bump when permissions are added; `PermissionUpgrade` then grants the new
   /// ones to the built-in roles that include them by default.
-  static const version = 2;
+  static const version = 3;
 
   /// Permissions introduced after the first release, by version.
   static const introduced = <int, Set<String>>{
@@ -45,6 +54,17 @@ abstract final class Permissions {
       cashbookView,
       cashbookManage,
       reportsExport,
+    },
+    3: {
+      creditView,
+      creditCreate,
+      creditReceivePayment,
+      creditOverrideLimit,
+      creditEditDueDate,
+      customerStatement,
+      backupCreate,
+      backupRestore,
+      backupSettings,
     },
   };
 
@@ -82,6 +102,15 @@ abstract final class Permissions {
     cashbookView,
     cashbookManage,
     reportsExport,
+    creditView,
+    creditCreate,
+    creditReceivePayment,
+    creditOverrideLimit,
+    creditEditDueDate,
+    customerStatement,
+    backupCreate,
+    backupRestore,
+    backupSettings,
   };
 
   static const cashier = <String>{
@@ -91,6 +120,9 @@ abstract final class Permissions {
     customersCreate,
     productsView,
     cashbookManage,
+    creditView,
+    creditCreate,
+    creditReceivePayment,
   };
 
   static const inventoryStaff = <String>{
@@ -127,6 +159,10 @@ abstract final class Permissions {
     reportsExport,
     inventoryTransfer,
     inventoryViewCost,
+    creditOverrideLimit,
+    creditEditDueDate,
+    customerStatement,
+    backupCreate,
   };
 
   static const admin = <String>{
@@ -138,6 +174,8 @@ abstract final class Permissions {
     settingsTheme,
     settingsStores,
     settingsBackup,
+    backupRestore,
+    backupSettings,
   };
 }
 
@@ -155,6 +193,7 @@ abstract final class PermissionCatalog {
     'Point of sale',
     'Products',
     'Customers',
+    'Credit',
     'Inventory',
     'Purchases',
     'Cashbook',
@@ -247,6 +286,42 @@ abstract final class PermissionCatalog {
       'Customers',
       'Edit customers',
       'Change customer details.',
+    ),
+    PermissionInfo(
+      Permissions.customerStatement,
+      'Customers',
+      'Customer statements',
+      'Print and export customer account statements.',
+    ),
+    PermissionInfo(
+      Permissions.creditView,
+      'Credit',
+      'View receivables',
+      'See customer balances, ledgers and due invoices.',
+    ),
+    PermissionInfo(
+      Permissions.creditCreate,
+      'Credit',
+      'Credit sales',
+      'Complete partial-payment and credit (udhaar) sales.',
+    ),
+    PermissionInfo(
+      Permissions.creditReceivePayment,
+      'Credit',
+      'Receive payments',
+      'Record and reverse customer payments.',
+    ),
+    PermissionInfo(
+      Permissions.creditOverrideLimit,
+      'Credit',
+      'Override credit limit',
+      'Continue a credit sale above the customer limit.',
+    ),
+    PermissionInfo(
+      Permissions.creditEditDueDate,
+      'Credit',
+      'Change due dates',
+      'Change the due date of a credit invoice.',
     ),
     PermissionInfo(
       Permissions.inventoryView,
@@ -359,8 +434,26 @@ abstract final class PermissionCatalog {
     PermissionInfo(
       Permissions.settingsBackup,
       'Settings',
-      'Backup & restore',
-      'Create and restore backups.',
+      'Data & backup page',
+      'Open the Data & Backup settings tab.',
+    ),
+    PermissionInfo(
+      Permissions.backupCreate,
+      'Settings',
+      'Create backups',
+      'Create and verify backup files.',
+    ),
+    PermissionInfo(
+      Permissions.backupRestore,
+      'Settings',
+      'Restore backups',
+      'Replace all data with a backup file.',
+    ),
+    PermissionInfo(
+      Permissions.backupSettings,
+      'Settings',
+      'Backup schedule',
+      'Change the backup folder, schedule and retention.',
     ),
   ];
 

@@ -10,6 +10,9 @@ import '../../../core/money/money.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
+import '../../credit/data/credit_ledger.dart';
+import '../../credit/data/credit_service.dart';
+import '../../credit/domain/credit.dart';
 import '../domain/pos_cart.dart';
 
 class CheckoutException implements Exception {
@@ -26,12 +29,20 @@ class CheckoutResult {
     required this.total,
     required this.received,
     required this.change,
+    this.outstanding = Money.zero,
+    this.dueDate,
   });
   final String saleId;
   final String invoiceNumber;
   final Money total;
   final Money received;
   final Money change;
+
+  /// Amount left on the customer's account (credit / partial sales).
+  final Money outstanding;
+  final DateTime? dueDate;
+
+  bool get isCredit => outstanding.minorUnits > 0;
 }
 
 final checkoutServiceProvider = Provider<CheckoutService>(
@@ -50,6 +61,8 @@ class CheckoutService {
     required AppSession session,
     required PosCart cart,
     required List<PaymentInput> payments,
+    DateTime? dueDate,
+    bool overrideCreditLimit = false,
   }) async {
     PermissionGuard.require(session, Permissions.posCreateSale);
     if (cart.lines.isEmpty) throw const CheckoutException('The cart is empty.');
@@ -109,10 +122,23 @@ class CheckoutService {
       Money.zero,
       (sum, payment) => sum + payment.amount,
     );
-    if (payments.isEmpty || received.compareTo(totals.grandTotal) < 0) {
-      throw const CheckoutException('Payment is less than the amount due.');
+    // Anything not paid now is a credit (udhaar) balance on the customer's
+    // account; that needs permission and a named customer.
+    final onAccount = (totals.grandTotal - received).max(Money.zero);
+    if (onAccount.minorUnits > 0) {
+      if (!session.can(Permissions.creditCreate)) {
+        throw const CheckoutException('Payment is less than the amount due.');
+      }
+      if (cart.customerId == null) {
+        throw const CheckoutException(
+          'Select a customer to create a credit sale.',
+        );
+      }
+      if (overrideCreditLimit) {
+        PermissionGuard.require(session, Permissions.creditOverrideLimit);
+      }
     }
-    final change = received - totals.grandTotal;
+    final change = (received - totals.grandTotal).max(Money.zero);
     final cashTendered = payments
         .where((payment) => payment.method.toLowerCase() == 'cash')
         .fold(Money.zero, (sum, payment) => sum + payment.amount);
@@ -126,9 +152,45 @@ class CheckoutService {
       fallback: false,
     );
 
+    final ledger = CreditLedger(_database, uuid: _uuid);
+    final due = onAccount.minorUnits > 0 && dueDate != null
+        ? DateTime(dueDate.year, dueDate.month, dueDate.day)
+        : null;
+
     return _database.transaction(() async {
       final now = DateTime.now();
       final saleId = _uuid.v4();
+      Customer? customer;
+      if (cart.customerId != null) {
+        customer = await (_database.select(
+          _database.customers,
+        )..where((row) => row.id.equals(cart.customerId!))).getSingleOrNull();
+        if (customer == null) {
+          throw const CheckoutException('The selected customer was not found.');
+        }
+      }
+      var limitOverridden = false;
+      Money? balanceBefore;
+      if (onAccount.minorUnits > 0) {
+        if (!customer!.isActive) {
+          throw const CheckoutException(
+            'Credit cannot be given to an inactive customer.',
+          );
+        }
+        balanceBefore = await ledger.balance(customer.id);
+        final limit = Money.fromMajor(customer.creditLimit);
+        if ((balanceBefore + onAccount).compareTo(limit) > 0) {
+          if (!overrideCreditLimit) {
+            throw CreditLimitException(
+              customerName: customer.name,
+              limit: limit,
+              outstanding: balanceBefore,
+              requested: onAccount,
+            );
+          }
+          limitOverridden = true;
+        }
+      }
       final unitCosts = <String, double>{};
       for (final line in cart.lines) {
         final product = await (_database.select(
@@ -187,7 +249,9 @@ class CheckoutService {
               grandTotal: totals.grandTotal.majorUnits,
               paidAmount: Value(received.majorUnits),
               changeAmount: Value(change.majorUnits),
-              paymentStatus: 'paid',
+              paymentStatus: PaymentStatus.of(totals.grandTotal, onAccount),
+              creditAmount: Value(onAccount.majorUnits),
+              dueDate: Value(due),
               saleStatus: 'completed',
               notes: Value(cart.notes.trim()),
               createdAt: now,
@@ -315,13 +379,41 @@ class CheckoutService {
             );
       }
 
-      if (cart.customerId != null) {
-        final customer = await (_database.select(
-          _database.customers,
-        )..where((row) => row.id.equals(cart.customerId!))).getSingle();
+      if (customer != null) {
+        // Customer account: the invoice is a debit, money taken now a credit,
+        // so a fully paid sale nets to zero and a credit sale leaves the
+        // unpaid part as the balance.
+        final paidNow = totals.grandTotal - onAccount;
+        final buyerId = customer.id;
+        await ledger.entry(
+          customerId: customer.id,
+          type: LedgerType.sale,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'sale',
+          referenceId: saleId,
+          referenceNumber: invoiceNumber,
+          debit: totals.grandTotal,
+          note: due == null
+              ? ''
+              : 'Due ${due.toIso8601String().substring(0, 10)}',
+          at: now,
+        );
+        await ledger.entry(
+          customerId: customer.id,
+          type: LedgerType.salePayment,
+          storeId: session.store.id,
+          userId: session.user.id,
+          referenceType: 'sale',
+          referenceId: saleId,
+          referenceNumber: invoiceNumber,
+          credit: paidNow,
+          note: payments.map((p) => p.method.toUpperCase()).toSet().join(', '),
+          at: now,
+        );
         await (_database.update(
           _database.customers,
-        )..where((row) => row.id.equals(customer.id))).write(
+        )..where((row) => row.id.equals(buyerId))).write(
           CustomersCompanion(
             loyaltyPoints: Value(
               customer.loyaltyPoints + totals.grandTotal.majorUnits.floor(),
@@ -349,11 +441,65 @@ class CheckoutService {
                   'paymentMethods': payments
                       .map((item) => item.method)
                       .toList(),
+                  if (onAccount.minorUnits > 0) ...{
+                    'creditMinor': onAccount.minorUnits,
+                    'customerId': customer!.id,
+                    'dueDate': due?.toIso8601String(),
+                  },
                 }),
               ),
               createdAt: now,
             ),
           );
+      if (onAccount.minorUnits > 0) {
+        await _database
+            .into(_database.auditLogs)
+            .insert(
+              AuditLogsCompanion.insert(
+                id: _uuid.v4(),
+                userId: Value(session.user.id),
+                storeId: Value(session.store.id),
+                action: 'credit.sale',
+                entityType: 'sale',
+                entityId: Value(saleId),
+                description:
+                    'Credit sale $invoiceNumber: $onAccount on account for ${customer!.name}.',
+                newValueJson: Value(
+                  jsonEncode({
+                    'customerId': customer.id,
+                    'creditMinor': onAccount.minorUnits,
+                    'balanceBeforeMinor': balanceBefore!.minorUnits,
+                  }),
+                ),
+                createdAt: now,
+              ),
+            );
+      }
+      if (limitOverridden) {
+        await _database
+            .into(_database.auditLogs)
+            .insert(
+              AuditLogsCompanion.insert(
+                id: _uuid.v4(),
+                userId: Value(session.user.id),
+                storeId: Value(session.store.id),
+                action: 'credit.limit_override',
+                entityType: 'customer',
+                entityId: Value(customer!.id),
+                description:
+                    'Credit limit ${Money.fromMajor(customer.creditLimit)} of ${customer.name} overridden on $invoiceNumber.',
+                newValueJson: Value(
+                  jsonEncode({
+                    'saleId': saleId,
+                    'limitMinor': Money.fromMajor(customer.creditLimit)
+                        .minorUnits,
+                    'projectedMinor': (balanceBefore! + onAccount).minorUnits,
+                  }),
+                ),
+                createdAt: now,
+              ),
+            );
+      }
 
       await _database
           .into(_database.invoiceSequences)
@@ -371,6 +517,8 @@ class CheckoutService {
         total: totals.grandTotal,
         received: received,
         change: change,
+        outstanding: onAccount,
+        dueDate: due,
       );
     });
   }

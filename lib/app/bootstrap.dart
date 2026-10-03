@@ -7,12 +7,19 @@ import 'package:window_manager/window_manager.dart';
 import '../core/database/app_database.dart';
 import '../core/database/database_provider.dart';
 import '../core/theme/theme_controller.dart';
+import '../features/receipts/data/receipt_service.dart';
+import '../features/receipts/presentation/printer_picker.dart';
+import 'app_host.dart';
 import 'storeflow_app.dart';
 
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   final preferences = await SharedPreferences.getInstance();
-  final database = AppDatabase();
+  final host = DatabaseHost(
+    AppDatabase(),
+    openDatabase: AppDatabase.new,
+    databaseFile: AppDatabase.databaseFile,
+  );
   final talker = TalkerFlutter.init();
 
   await windowManager.ensureInitialized();
@@ -35,14 +42,21 @@ Future<void> bootstrap() async {
     FlutterError.presentError(details);
   };
 
+  // A restore replaces the database; the new scope starts signed out.
   runApp(
-    ProviderScope(
-      overrides: [
-        sharedPreferencesProvider.overrideWithValue(preferences),
-        databaseProvider.overrideWithValue(database),
-        talkerProvider.overrideWithValue(talker),
-      ],
-      child: const StoreFlowApp(),
+    ListenableBuilder(
+      listenable: host,
+      builder: (context, _) => ProviderScope(
+        key: ValueKey(host.generation),
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          databaseProvider.overrideWithValue(host.database),
+          databaseHostProvider.overrideWithValue(host),
+          talkerProvider.overrideWithValue(talker),
+          printerChooserProvider.overrideWithValue(choosePrinter),
+        ],
+        child: const StoreFlowApp(),
+      ),
     ),
   );
 }

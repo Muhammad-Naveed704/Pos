@@ -11,6 +11,8 @@ import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permissions.dart';
+import '../../backup/application/backup_providers.dart';
+import '../../credit/presentation/receivables_card.dart';
 import '../../settings/data/business_settings_repository.dart';
 import '../../stores/data/store_repository.dart';
 import 'module_page.dart';
@@ -30,6 +32,53 @@ class _AppShellState extends ConsumerState<AppShell> {
       ref.read(sharedPreferencesProvider).getBool(_collapsedPreference) ??
       false;
 
+  Timer? _backupTimer;
+  bool _backupRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Scheduled backups run while someone is signed in: shortly after
+    // sign-in, then every 30 minutes the schedule is checked.
+    _backupTimer = Timer(const Duration(seconds: 20), () {
+      _scheduledBackup();
+      _backupTimer = Timer.periodic(
+        const Duration(minutes: 30),
+        (_) => _scheduledBackup(),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _backupTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _scheduledBackup() async {
+    final session = ref.read(activeSessionProvider);
+    if (_backupRunning || session == null || session.isLocked) return;
+    _backupRunning = true;
+    try {
+      final result = await ref
+          .read(backupServiceProvider)
+          .runScheduled(session);
+      if (result != null && mounted) {
+        Toast.success(context, 'Scheduled backup saved and verified.');
+      }
+    } catch (error) {
+      if (mounted) {
+        Toast.show(
+          context,
+          'Scheduled backup failed: ${friendlyError(error)}',
+          tone: PillTone.danger,
+        );
+      }
+    } finally {
+      _backupRunning = false;
+    }
+  }
+
   void _toggle() {
     setState(() => _collapsed = !_collapsed);
     ref
@@ -43,7 +92,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     final session = ref.watch(activeSessionProvider)!;
     final showSettings =
         session.can(Permissions.settingsManage) ||
-        session.can(Permissions.settingsTheme);
+        session.can(Permissions.settingsTheme) ||
+        session.can(Permissions.backupCreate) ||
+        session.can(Permissions.backupRestore);
     final destinations = moduleDefinitions
         .where(
           (item) => item.permission == null || session.can(item.permission!),
@@ -55,6 +106,15 @@ class _AppShellState extends ConsumerState<AppShell> {
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
             context.go('/pos'),
         const SingleActivator(LogicalKeyboardKey.keyB, control: true): _toggle,
+        const SingleActivator(
+          LogicalKeyboardKey.keyP,
+          control: true,
+          shift: true,
+        ): () {
+          if (session.can(Permissions.creditReceivePayment)) {
+            receivePaymentShortcut(context, ref);
+          }
+        },
         const SingleActivator(LogicalKeyboardKey.keyL, control: true): () =>
             ref.read(sessionControllerProvider.notifier).lock(),
       },
@@ -509,8 +569,8 @@ class _StoreSwitcher extends ConsumerWidget {
   final AppSession session;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => StreamBuilder(
-    stream: ref.watch(storeRepositoryProvider).watchAll(),
+  Widget build(BuildContext context, WidgetRef ref) => CachedStreamBuilder(
+    create: ref.read(storeRepositoryProvider).watchAll,
     builder: (context, snapshot) {
       final stores = (snapshot.data ?? const [])
           .where(

@@ -85,8 +85,12 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
         WHERE store_id = ?1 AND sale_status <> 'voided' AND $today), 0.0) AS change_today,
       COALESCE((SELECT SUM(amount) FROM sale_refunds
         WHERE store_id = ?1 AND kind = 'refund' AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0) AS refunds,
-      COALESCE((SELECT SUM(amount) FROM sale_refunds
+      COALESCE((SELECT SUM(amount - credit_applied) FROM sale_refunds
         WHERE store_id = ?1 AND kind = 'refund' AND method = 'cash' AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')), 0.0) AS cash_refunds,
+      -- Cash received today against customer accounts, net of reversals.
+      COALESCE((SELECT SUM(CASE WHEN type = 'customer_payment' THEN amount ELSE -amount END)
+        FROM cash_transactions
+        WHERE store_id = ?1 AND type IN ('customer_payment', 'customer_refund') AND $today), 0.0) AS account_cash,
       (SELECT COUNT(*) FROM product_stores
         WHERE store_id = ?1 AND is_available = 1 AND stock_qty > 0 AND stock_qty <= reorder_level) AS low_stock,
       (SELECT COUNT(*) FROM product_stores
@@ -179,7 +183,9 @@ final dashboardMetricsProvider = FutureProvider.autoDispose<DashboardMetrics>((
     customers: row.read<int>('customers'),
     discounts: row.read<double>('discounts'),
     cashCollected:
-        row.read<double>('cash_collected') - row.read<double>('cash_refunds'),
+        row.read<double>('cash_collected') -
+        row.read<double>('cash_refunds') +
+        row.read<double>('account_cash'),
     lowStock: row.read<int>('low_stock'),
     outOfStock: row.read<int>('out_of_stock'),
     hourly: hourly,

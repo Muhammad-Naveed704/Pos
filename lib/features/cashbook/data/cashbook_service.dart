@@ -30,7 +30,14 @@ abstract final class CashType {
   static const payOut = 'pay_out';
   static const refund = 'cash_refund';
 
-  static bool isOutflow(String type) => type == payOut || type == refund;
+  /// Cash received against a customer account (credit payments).
+  static const customerPayment = 'customer_payment';
+
+  /// A reversed customer payment paid back from the drawer.
+  static const customerRefund = 'customer_refund';
+
+  static bool isOutflow(String type) =>
+      type == payOut || type == refund || type == customerRefund;
 }
 
 const payOutCategories = [
@@ -95,9 +102,9 @@ class CashbookService {
       COALESCE((SELECT SUM(amount) FROM cash_transactions t
         WHERE t.session_id = cs.id AND t.type = 'cash_sale'), 0.0) AS cash_sales,
       COALESCE((SELECT SUM(amount) FROM cash_transactions t
-        WHERE t.session_id = cs.id AND t.type = 'pay_in'), 0.0) AS pay_ins,
+        WHERE t.session_id = cs.id AND t.type IN ('pay_in', 'customer_payment')), 0.0) AS pay_ins,
       COALESCE((SELECT SUM(amount) FROM cash_transactions t
-        WHERE t.session_id = cs.id AND t.type IN ('pay_out', 'cash_refund')), 0.0) AS pay_outs
+        WHERE t.session_id = cs.id AND t.type IN ('pay_out', 'cash_refund', 'customer_refund')), 0.0) AS pay_outs
     FROM cash_sessions cs
     JOIN users u ON u.id = cs.user_id
   ''';

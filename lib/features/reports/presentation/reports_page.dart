@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/database/database_provider.dart';
 import '../../../core/money/money_format.dart';
 import '../../../core/ui/import_dialog.dart';
 import '../../../core/ui/ui_kit.dart';
@@ -25,6 +26,32 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   Future<ReportResult>? _result;
   int? _sortColumn;
   bool _sortAscending = false;
+  ReportFilters _filters = const ReportFilters();
+  late final Future<_FilterChoices> _choices = _loadChoices();
+
+  Future<_FilterChoices> _loadChoices() async {
+    final database = ref.read(databaseProvider);
+    final customers = await database.customSelect('''
+      SELECT id, name FROM customers
+      WHERE id IN (SELECT DISTINCT customer_id FROM customer_ledger_entries)
+      ORDER BY name COLLATE NOCASE
+    ''').get();
+    final users = await database
+        .customSelect(
+          'SELECT id, display_name FROM users ORDER BY display_name COLLATE NOCASE',
+        )
+        .get();
+    return _FilterChoices(
+      customers: [
+        for (final row in customers)
+          (row.read<String>('id'), row.read<String>('name')),
+      ],
+      cashiers: [
+        for (final row in users)
+          (row.read<String>('id'), row.read<String>('display_name')),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -41,7 +68,12 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     _sortColumn = null;
     _result = ref
         .read(reportsServiceProvider)
-        .run(ref.read(activeSessionProvider)!, _kind, _range);
+        .run(
+          ref.read(activeSessionProvider)!,
+          _kind,
+          _range,
+          filters: _filters,
+        );
   }
 
   String get _period => describeRange(_range);
@@ -162,7 +194,22 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                       ),
                     ),
                   ),
-                  for (final kind in kinds)
+                  for (final kind in kinds) ...[
+                    if (kind.isCredit &&
+                        kinds.indexOf(kind) > 0 &&
+                        !kinds[kinds.indexOf(kind) - 1].isCredit)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 16, 10, 8),
+                        child: Text(
+                          'CUSTOMER ACCOUNTS',
+                          style: TextStyle(
+                            fontSize: 11,
+                            letterSpacing: 1.1,
+                            fontWeight: FontWeight.w800,
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                     ListTile(
                       dense: true,
                       selected: kind == _kind,
@@ -177,6 +224,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                         _load();
                       }),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -194,7 +242,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                       title: _kind.label,
                       subtitle: _kind.usesDates
                           ? '${session.store.name} · $_period'
-                          : '${session.store.name} · current stock',
+                          : _kind == ReportKind.stock
+                          ? '${session.store.name} · current stock'
+                          : '${session.store.name} · as of today',
+
                       actions: [
                         if (_kind.usesDates)
                           DateRangeButton(
@@ -222,6 +273,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                         ],
                       ],
                     ),
+                    if (_kind.isCredit) ...[
+                      const SizedBox(height: 10),
+                      _creditFilters(context),
+                    ],
                     const SizedBox(height: 14),
                     Expanded(
                       child: snapshot.hasError
@@ -245,6 +300,77 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       ),
     );
   }
+
+  void _setFilters(ReportFilters filters) => setState(() {
+    _filters = filters;
+    _load();
+  });
+
+  Widget _creditFilters(BuildContext context) => FutureBuilder<_FilterChoices>(
+    future: _choices,
+    builder: (context, snapshot) {
+      final choices = snapshot.data;
+      if (choices == null) return const LinearProgressIndicator();
+      return Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          AppSelect<String?>(
+            width: 260,
+            label: 'Customer',
+            icon: Icons.person_outline_rounded,
+            searchable: true,
+            hint: _kind.needsCustomer ? 'Choose a customer' : null,
+            items: [
+              if (!_kind.needsCustomer) const SelectItem(null, 'All customers'),
+              for (final (id, name) in choices.customers) SelectItem(id, name),
+            ],
+            value: _filters.customerId,
+            onChanged: (id) =>
+                _setFilters(_filters.copyWith(customerId: () => id)),
+          ),
+          if (_kind.usesCashier)
+            AppSelect<String?>(
+              width: 200,
+              label: 'Cashier',
+              icon: Icons.badge_outlined,
+              items: [
+                const SelectItem(null, 'All users'),
+                for (final (id, name) in choices.cashiers) SelectItem(id, name),
+              ],
+              value: _filters.cashierId,
+              onChanged: (id) =>
+                  _setFilters(_filters.copyWith(cashierId: () => id)),
+            ),
+          if (_kind.usesMethod)
+            AppSelect<String?>(
+              width: 170,
+              label: 'Method',
+              items: const [
+                SelectItem(null, 'All methods'),
+                SelectItem('cash', 'Cash'),
+                SelectItem('card', 'Card'),
+                SelectItem('bank', 'Bank / wallet'),
+                SelectItem('other', 'Other'),
+              ],
+              value: _filters.method,
+              onChanged: (m) => _setFilters(_filters.copyWith(method: () => m)),
+            ),
+          if (_kind.usesStore && _kind != ReportKind.customerBalances)
+            AppSegmented<bool>(
+              items: const [
+                SegmentItem(false, 'This store'),
+                SegmentItem(true, 'All stores'),
+              ],
+              value: _filters.allStores,
+              onChanged: (all) =>
+                  _setFilters(_filters.copyWith(allStores: all)),
+            ),
+        ],
+      );
+    },
+  );
 
   Widget _body(
     BuildContext context,
@@ -322,37 +448,40 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                     for (var i = 0; i < result.columns.length; i++)
                       Expanded(
                         flex: result.columns[i].flex,
-                        child: InkWell(
-                          onTap: () => setState(() {
-                            if (_sortColumn == i) {
-                              _sortAscending = !_sortAscending;
-                            } else {
-                              _sortColumn = i;
-                              _sortAscending = !result.columns[i].numeric;
-                            }
-                          }),
-                          child: Row(
-                            mainAxisAlignment: result.columns[i].numeric
-                                ? MainAxisAlignment.end
-                                : MainAxisAlignment.start,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  result.columns[i].label,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: InkWell(
+                            onTap: () => setState(() {
+                              if (_sortColumn == i) {
+                                _sortAscending = !_sortAscending;
+                              } else {
+                                _sortColumn = i;
+                                _sortAscending = !result.columns[i].numeric;
+                              }
+                            }),
+                            child: Row(
+                              mainAxisAlignment: result.columns[i].numeric
+                                  ? MainAxisAlignment.end
+                                  : MainAxisAlignment.start,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    result.columns[i].label,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (_sortColumn == i)
-                                Icon(
-                                  _sortAscending
-                                      ? Icons.arrow_upward_rounded
-                                      : Icons.arrow_downward_rounded,
-                                  size: 14,
-                                ),
-                            ],
+                                if (_sortColumn == i)
+                                  Icon(
+                                    _sortAscending
+                                        ? Icons.arrow_upward_rounded
+                                        : Icons.arrow_downward_rounded,
+                                    size: 14,
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -385,23 +514,29 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                         for (var i = 0; i < result.columns.length; i++)
                           Expanded(
                             flex: result.columns[i].flex,
-                            child: Text(
-                              _format(
-                                rows[r][i],
-                                result.columns[i].kind,
-                                money,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
                               ),
-                              textAlign: result.columns[i].numeric
-                                  ? TextAlign.end
-                                  : TextAlign.start,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: i == 0 ? FontWeight.w600 : null,
-                                color:
-                                    rows[r][i] is num && (rows[r][i] as num) < 0
-                                    ? context.colors.error
-                                    : null,
+                              child: Text(
+                                _format(
+                                  rows[r][i],
+                                  result.columns[i].kind,
+                                  money,
+                                ),
+                                textAlign: result.columns[i].numeric
+                                    ? TextAlign.end
+                                    : TextAlign.start,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: i == 0 ? FontWeight.w600 : null,
+                                  color:
+                                      rows[r][i] is num &&
+                                          (rows[r][i] as num) < 0
+                                      ? context.colors.error
+                                      : null,
+                                ),
                               ),
                             ),
                           ),
@@ -423,6 +558,12 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       ],
     );
   }
+}
+
+class _FilterChoices {
+  const _FilterChoices({required this.customers, required this.cashiers});
+  final List<(String, String)> customers;
+  final List<(String, String)> cashiers;
 }
 
 class _ReportChart extends StatelessWidget {

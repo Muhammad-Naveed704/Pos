@@ -12,6 +12,7 @@ import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
 import '../../categories/data/category_repository.dart';
+import '../../credit/data/credit_service.dart';
 import '../../history/data/sales_repository.dart';
 import '../../products/data/product_repository.dart';
 import '../../receipts/data/receipt_service.dart';
@@ -224,13 +225,6 @@ class _PosPageState extends ConsumerState<PosPage> {
   }
 
   Widget _catalog(String storeId, MoneyFormatter money) {
-    final products = ref
-        .watch(productRepositoryProvider)
-        .watchPosProducts(
-          storeId: storeId,
-          search: _term,
-          categoryId: _categoryId,
-        );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -287,10 +281,9 @@ class _PosPageState extends ConsumerState<PosPage> {
             const SizedBox(height: 12),
             SizedBox(
               height: 36,
-              child: StreamBuilder<List<Category>>(
-                stream: ref
-                    .watch(categoryRepositoryProvider)
-                    .watch(active: true),
+              child: CachedStreamBuilder<List<Category>>(
+                create: () =>
+                    ref.read(categoryRepositoryProvider).watch(active: true),
                 builder: (context, snapshot) => ListView(
                   scrollDirection: Axis.horizontal,
                   children: [
@@ -316,8 +309,15 @@ class _PosPageState extends ConsumerState<PosPage> {
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: StreamBuilder<List<CatalogProduct>>(
-                stream: products,
+              child: CachedStreamBuilder<List<CatalogProduct>>(
+                keys: [storeId, _term, _categoryId],
+                create: () => ref
+                    .read(productRepositoryProvider)
+                    .watchPosProducts(
+                      storeId: storeId,
+                      search: _term,
+                      categoryId: _categoryId,
+                    ),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return EmptyState(
@@ -537,31 +537,104 @@ class _PosPageState extends ConsumerState<PosPage> {
     await _complete([PaymentInput(method: 'cash', amount: total)]);
   }
 
+  Future<CreditCustomer?> _creditCustomer(String? customerId) async {
+    if (customerId == null) return null;
+    final balance = await ref
+        .read(creditServiceProvider)
+        .balance(ref.read(activeSessionProvider)!, customerId);
+    return CreditCustomer(
+      id: customerId,
+      name: balance.customer.name,
+      outstanding: balance.outstanding,
+      limit: balance.creditLimit,
+    );
+  }
+
   Future<void> _payment() async {
     if (_busy) return;
     final total = _amountDue();
     if (total == null) return;
-    final payments = await showPaymentDialog(
+    final session = ref.read(activeSessionProvider)!;
+    final allowCredit = session.can(Permissions.creditCreate);
+    CreditCustomer? customer;
+    if (allowCredit) {
+      try {
+        customer = await _creditCustomer(
+          ref.read(cartControllerProvider).customerId,
+        );
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    final decision = await showPaymentDialog(
       context,
       total: total,
       money: _money,
       denominations: _settings.quickCashDenominations,
+      allowCredit: allowCredit,
+      customer: customer,
+      onPickCustomer: () async {
+        final choice = await showCustomerPicker(context);
+        if (choice is! SelectedCustomer) return null;
+        ref
+            .read(cartControllerProvider.notifier)
+            .selectCustomer(choice.customer.id);
+        return _creditCustomer(choice.customer.id);
+      },
     );
-    if (payments != null && mounted) await _complete(payments);
+    if (decision == null || !mounted) return;
+    if (decision.customerId != null &&
+        decision.customerId != ref.read(cartControllerProvider).customerId) {
+      ref
+          .read(cartControllerProvider.notifier)
+          .selectCustomer(decision.customerId);
+    }
+    await _complete(decision.payments, dueDate: decision.dueDate);
   }
 
-  Future<void> _complete(List<PaymentInput> payments) async {
+  Future<void> _complete(
+    List<PaymentInput> payments, {
+    DateTime? dueDate,
+  }) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       final session = ref.read(activeSessionProvider)!;
-      final result = await ref
+      Future<CheckoutResult> run(bool override) => ref
           .read(checkoutServiceProvider)
           .checkout(
             session: session,
             cart: ref.read(cartControllerProvider),
             payments: payments,
+            dueDate: dueDate,
+            overrideCreditLimit: override,
           );
+      CheckoutResult result;
+      try {
+        result = await run(false);
+      } on CreditLimitException catch (limit) {
+        if (!mounted) return;
+        if (!session.can(Permissions.creditOverrideLimit)) {
+          throw CheckoutException(
+            '${limit.customerName} would owe ${_money.format(limit.projected)}, '
+            'over the ${_money.format(limit.limit)} credit limit. A manager can approve it.',
+          );
+        }
+        final approved = await confirmDialog(
+          context,
+          title: 'Credit limit exceeded',
+          icon: Icons.gpp_maybe_rounded,
+          message:
+              '${limit.customerName} owes ${_money.format(limit.outstanding)} with a '
+              'limit of ${_money.format(limit.limit)}. This sale adds '
+              '${_money.format(limit.requested)}, bringing the balance to '
+              '${_money.format(limit.projected)}.\n\n'
+              'Continue anyway? The override is recorded in the audit log.',
+          confirmLabel: 'Override and complete',
+          destructive: true,
+        );
+        if (!approved) return;
+        result = await run(true);
+      }
       ref.read(cartControllerProvider.notifier).clear();
       _resetSearch();
       if (!mounted) return;

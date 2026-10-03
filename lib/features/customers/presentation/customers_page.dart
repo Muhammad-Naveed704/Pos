@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/ui/ui_kit.dart';
 import '../../settings/data/business_settings_repository.dart';
@@ -7,6 +8,8 @@ import '../../auth/domain/permissions.dart';
 
 import '../../../core/database/app_database.dart';
 import '../../auth/application/session_controller.dart';
+import '../../backup/application/backup_providers.dart';
+import 'customer_editor.dart';
 import '../../../core/ui/import_dialog.dart';
 import '../data/customer_import_service.dart';
 import '../data/customer_repository.dart';
@@ -44,7 +47,13 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
         prepare: (table, update) =>
             service.prepare(session, table, updateExisting: update),
         previewOf: (plan) => plan.preview,
-        apply: (plan) => service.apply(session, plan),
+        apply: (plan) async {
+          // Safety backup first (if enabled in Data & backup).
+          await ref
+              .read(backupServiceProvider)
+              .beforeRiskyOperation(session, 'customer import');
+          return service.apply(session, plan);
+        },
       ),
     );
   }
@@ -67,6 +76,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   @override
   Widget build(BuildContext context) {
     final repository = ref.watch(customerRepositoryProvider);
+    final balances = ref.watch(customerBalancesProvider).value ?? const {};
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -108,8 +118,9 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
           const SizedBox(height: 14),
           Expanded(
             child: Card(
-              child: StreamBuilder<List<Customer>>(
-                stream: repository.watchAll(search: _search),
+              child: CachedStreamBuilder<List<Customer>>(
+                keys: [_search],
+                create: () => repository.watchAll(search: _search),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());
@@ -123,7 +134,9 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                     separatorBuilder: (_, _) => const Divider(),
                     itemBuilder: (context, index) {
                       final customer = customers[index];
+                      final owes = balances[customer.id] ?? 0;
                       return ListTile(
+                        onTap: () => context.go('/customers/${customer.id}'),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 18,
                           vertical: 6,
@@ -150,6 +163,14 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (owes > 0.004) ...[
+                              StatusPill(
+                                'Owes ${ref.watch(moneyFormatterProvider).major(owes)}',
+                                tone: PillTone.warning,
+                                icon: Icons.account_balance_wallet_outlined,
+                              ),
+                              const SizedBox(width: 8),
+                            ],
                             Chip(
                               label: Text(
                                 customer.isActive ? 'Active' : 'Inactive',
@@ -224,133 +245,6 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     );
   }
 
-  Future<void> _edit(BuildContext context, {Customer? customer}) async {
-    final name = TextEditingController(text: customer?.name ?? '');
-    final phone = TextEditingController(text: customer?.phone ?? '');
-    final email = TextEditingController(text: customer?.email ?? '');
-    final address = TextEditingController(text: customer?.address ?? '');
-    final notes = TextEditingController(text: customer?.notes ?? '');
-    final money = ref.read(moneyFormatterProvider);
-    String n(double? value) {
-      if (value == null || value == 0) return '';
-      final text = value == value.roundToDouble()
-          ? value.toStringAsFixed(0)
-          : value.toString();
-      return money.decimalSeparator == ',' ? text.replaceAll('.', ',') : text;
-    }
-
-    final credit = TextEditingController(text: n(customer?.creditLimit));
-    final opening = TextEditingController(text: n(customer?.openingBalance));
-    var active = customer?.isActive ?? true;
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(customer == null ? 'New customer' : 'Edit customer'),
-          content: SizedBox(
-            width: 520,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: name,
-                    autofocus: true,
-                    decoration: const InputDecoration(labelText: 'Name'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: phone,
-                          decoration: const InputDecoration(labelText: 'Phone'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: email,
-                          decoration: const InputDecoration(labelText: 'Email'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: address,
-                    decoration: const InputDecoration(labelText: 'Address'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: notes,
-                    maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Notes'),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: credit,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Credit limit',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: opening,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Opening balance',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (customer != null)
-                    SwitchListTile(
-                      value: active,
-                      onChanged: (value) =>
-                          setDialogState(() => active = value),
-                      title: const Text('Active'),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (saved != true) return;
-    await ref
-        .read(customerRepositoryProvider)
-        .save(
-          session: ref.read(activeSessionProvider)!,
-          id: customer?.id,
-          name: name.text,
-          phone: phone.text,
-          email: email.text,
-          address: address.text,
-          notes: notes.text,
-          loyaltyPoints: customer?.loyaltyPoints ?? 0,
-          creditLimit: ref.read(moneyFormatterProvider).parse(credit.text) ?? 0,
-          openingBalance:
-              ref.read(moneyFormatterProvider).parse(opening.text) ?? 0,
-          isActive: active,
-        );
-  }
+  Future<void> _edit(BuildContext context, {Customer? customer}) =>
+      editCustomer(context, ref, customer: customer);
 }

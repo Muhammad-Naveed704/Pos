@@ -74,8 +74,9 @@ class _UsersList extends ConsumerWidget {
     final session = ref.watch(activeSessionProvider)!;
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: StreamBuilder<List<UserWithRole>>(
-        stream: ref.watch(userRepositoryProvider).watchAll(session),
+      child: CachedStreamBuilder<List<UserWithRole>>(
+        keys: [session.user.id, session.store.id],
+        create: () => ref.read(userRepositoryProvider).watchAll(session),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return EmptyState(

@@ -33,8 +33,8 @@ class StoresPage extends ConsumerWidget {
           const SizedBox(height: 18),
           Expanded(
             child: Card(
-              child: StreamBuilder(
-                stream: repository.watchAll(),
+              child: CachedStreamBuilder(
+                create: repository.watchAll,
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(child: CircularProgressIndicator());

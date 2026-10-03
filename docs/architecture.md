@@ -25,8 +25,12 @@ transfer and restore. The dashboard uses active-store-scoped read-only aggregate
 
 Schema version 1 created the complete table set and base indexes. Version 2 adds
 scoped settings, account/store, hierarchy, exact barcode/SKU, held-cart and payment
-lookup indexes without rebuilding business tables. Upgrade tests open a version 1
-database, retain seeded data and verify the new indexes. Downgrade is unsupported.
+lookup indexes without rebuilding business tables. Version 3 adds sale cost
+snapshots, version 4 refund tables, and version 5 customer accounts
+(`customer_payments`, `customer_ledger_entries`, `payment_allocations`,
+`sales.credit_amount/due_date`, `sale_refunds.credit_applied`) plus backup
+metadata. Upgrade tests open older databases, retain seeded data and verify the
+new schema. Downgrade is unsupported.
 Stock quantities may change only in the same transaction that inserts a
 `stock_movements` record.
 
@@ -36,6 +40,18 @@ Checkout is one database transaction: allocate invoice number, insert sale and
 items, insert payments, decrement per-store stock, append stock movements, append
 cash entry when applicable, and append audit log. Any error rolls back everything.
 Purchases and transfers use the same invariant.
+
+Credit checkout adds, in the same transaction: credit-limit check against the
+ledger balance (override requires `credit.override_limit` and is audited),
+`sales.credit_amount`/`due_date`, and customer ledger rows (sale debit, paid-now
+credit). Customer payments insert the payment, its allocations, the ledger
+credit, the drawer cash entry and the audit row in one transaction.
+
+Restore runs outside the normal providers: `DatabaseHost` owns the connection.
+The backup is validated (manifest, SHA-256 per entry, schema version, SQLite
+integrity) before anything changes; a safety backup is created; the live files
+are moved aside, the backup copied in and reopened (migrations run) and checked.
+Any failure puts the previous files back and reopens them.
 
 ## Performance policy
 
@@ -56,5 +72,6 @@ and constant-time comparison. Login rejects inactive accounts; every protected
 repository/service repeats authorization checks and store scope is resolved from
 the active session. Only the last selected store is persisted. Master data uses
 inactive flags rather than physical deletion and audit records are append-only at
-the application layer. Restore will verify a checksum and create a safety backup
-before replacing the live database.
+the application layer. Restore verifies checksums and creates a safety backup before replacing the live
+database, and rolls back to the previous files if the restored data cannot be
+opened.
