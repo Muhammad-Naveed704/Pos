@@ -88,10 +88,10 @@ class _PrinterPickerState extends ConsumerState<_PrinterPicker> {
             ),
           ),
           const SizedBox(height: 8),
-          CheckboxListTile(
+          SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _always,
-            onChanged: (value) => setState(() => _always = value ?? false),
+            onChanged: (value) => setState(() => _always = value),
             title: const Text('Always print here without asking'),
             subtitle: const Text('Change later in Settings → Receipt designer'),
           ),

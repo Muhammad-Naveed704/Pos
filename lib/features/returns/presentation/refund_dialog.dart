@@ -328,7 +328,7 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
                                     const SizedBox(width: 10),
                                     SizedBox(
                                       width: 150,
-                                      child: CheckboxListTile(
+                                      child: SwitchListTile(
                                         dense: true,
                                         contentPadding: EdgeInsets.zero,
                                         controlAffinity:
@@ -338,8 +338,7 @@ class _RefundDialogState extends ConsumerState<_RefundDialog> {
                                             line.line.tracksStock,
                                         onChanged: line.line.tracksStock
                                             ? (value) => setState(
-                                                () => line.restock =
-                                                    value ?? true,
+                                                () => line.restock = value,
                                               )
                                             : null,
                                         title: const Text('Back to stock'),

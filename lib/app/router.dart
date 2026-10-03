@@ -38,7 +38,8 @@ final appRouter = GoRouter(
         GoRoute(path: '/pos', builder: (context, state) => const PosPage()),
         GoRoute(
           path: '/products',
-          builder: (context, state) => const ProductsPage(),
+          builder: (context, state) =>
+              ProductsPage(initialSearch: state.uri.queryParameters['q'] ?? ''),
         ),
         GoRoute(
           path: '/categories',

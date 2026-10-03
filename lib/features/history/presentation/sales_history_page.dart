@@ -528,7 +528,11 @@ class _SaleDetailsDialogState extends ConsumerState<_SaleDetailsDialog> {
       .load(ref.read(activeSessionProvider)!, widget.details.summary.sale.id);
 
   void _afterChange(bool changed) {
-    if (changed && mounted) setState(() => _returns = _loadReturns());
+    if (changed && mounted) {
+      setState(() {
+        _returns = _loadReturns();
+      });
+    }
   }
 
   static String _qty(double value) => value == value.roundToDouble()

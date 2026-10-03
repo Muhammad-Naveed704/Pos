@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -92,7 +91,13 @@ class _PosPageState extends ConsumerState<PosPage> {
   BusinessSettings get _settings => ref.read(currentBusinessSettingsProvider);
   MoneyFormatter get _money => ref.read(moneyFormatterProvider);
 
+  /// F2: focus the search box; pressed again while it is focused, open the
+  /// camera scanner.
   void _focusSearch() {
+    if (_searchFocus.hasFocus) {
+      _scanWithCamera();
+      return;
+    }
     _searchFocus.requestFocus();
     _search.selection = TextSelection(
       baseOffset: 0,
@@ -245,7 +250,7 @@ class _PosPageState extends ConsumerState<PosPage> {
               },
               decoration: InputDecoration(
                 prefixIcon: Tooltip(
-                  message: 'Scan with camera',
+                  message: 'Scan with camera (F2)',
                   child: IconButton(
                     icon: const Icon(Icons.qr_code_scanner_rounded),
                     color: context.colors.primary,
@@ -345,8 +350,8 @@ class _PosPageState extends ConsumerState<PosPage> {
                   return GridView.builder(
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 200,
-                          mainAxisExtent: 148,
+                          maxCrossAxisExtent: 230,
+                          mainAxisExtent: 372,
                           crossAxisSpacing: 10,
                           mainAxisSpacing: 10,
                         ),
@@ -721,109 +726,170 @@ class _ProductTileState extends State<_ProductTile> {
     final product = item.product;
     final scheme = context.colors;
     final tokens = context.tokens;
-    final palette = tokens.chartPalette;
-    final tint = palette[product.name.hashCode.abs() % palette.length];
     final stock = item.store.stockQty;
     final (stockLabel, tone) = !product.trackInventory
         ? (null, PillTone.neutral)
         : stock <= 0
-        ? ('Out', PillTone.danger)
+        ? ('Out of stock', PillTone.danger)
         : stock <= item.store.reorderLevel
-        ? (formatQuantity((stock * 1000).round()), PillTone.warning)
-        : (formatQuantity((stock * 1000).round()), PillTone.success);
-    final imagePath = product.imagePath;
-    final hasImage = imagePath != null && imagePath.isNotEmpty;
+        ? ('${formatQuantity((stock * 1000).round())} left', PillTone.warning)
+        : (
+            '${formatQuantity((stock * 1000).round())} in stock',
+            PillTone.success,
+          );
+    final out = product.trackInventory && stock <= 0;
+    final discount = item.effectiveDiscount.clamp(0, 100);
+    final price = item.effectivePrice * (1 - discount / 100);
+    final radius = BorderRadius.circular(tokens.radius + 6);
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      child: AnimatedScale(
-        scale: _hover ? 1.02 : 1,
-        duration: tokens.motion(120),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: tokens.motion(140),
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+        decoration: BoxDecoration(
+          color: context.theme.cardTheme.color ?? scheme.surface,
+          borderRadius: radius,
+          border: Border.all(
+            color: _hover
+                ? scheme.primary.withValues(alpha: 0.55)
+                : scheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: _hover ? 0.09 : 0.04),
+              blurRadius: _hover ? 20 : 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
         child: Material(
-          color: _hover
-              ? scheme.primaryContainer.withValues(alpha: 0.35)
-              : scheme.surfaceContainerLow,
-          borderRadius: tokens.borderRadius,
-          clipBehavior: Clip.antiAlias,
+          type: MaterialType.transparency,
           child: InkWell(
+            borderRadius: radius,
             onTap: widget.onTap,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: tokens.borderRadius,
-                border: Border.all(
-                  color: _hover
-                      ? scheme.primary.withValues(alpha: 0.6)
-                      : scheme.outlineVariant.withValues(alpha: 0.6),
-                ),
-              ),
-              padding: const EdgeInsets.all(11),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: tint.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        alignment: Alignment.center,
-                        child: hasImage
-                            ? Image.file(
-                                File(imagePath),
-                                fit: BoxFit.cover,
-                                cacheWidth: 96,
-                                errorBuilder: (_, _, _) =>
-                                    _Initial(product.name, tint),
-                              )
-                            : _Initial(product.name, tint),
-                      ),
-                      const Spacer(),
-                      if (stockLabel != null)
-                        StatusPill(stockLabel, tone: tone),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    product.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
-                    ),
-                  ),
-                  const Spacer(),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          widget.money.major(item.effectivePrice),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w800,
+                  // Photo fills the top of the card (cover).
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: LayoutBuilder(
+                            builder: (context, box) => Opacity(
+                              opacity: out ? 0.5 : 1,
+                              child: ProductThumb(
+                                name: product.name,
+                                path: product.imagePath,
+                                width: box.maxWidth,
+                                height: box.maxHeight,
+                                radius: tokens.radius + 2,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                      if (item.effectiveDiscount > 0)
-                        StatusPill(
-                          '-${item.effectiveDiscount.toStringAsFixed(0)}%',
-                          tone: PillTone.info,
-                        ),
-                    ],
+                        if (discount > 0)
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: StatusPill(
+                              '-${discount.toStringAsFixed(0)}%',
+                              tone: PillTone.info,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  Text(
-                    product.sku,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.text.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 10, 4, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (item.category != null) ...[
+                          StatusPill(item.category!.name, tone: PillTone.info),
+                          const SizedBox(height: 6),
+                        ],
+                        Text(
+                          product.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        Text(
+                          'SKU: ${product.sku}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (stockLabel != null) ...[
+                          const SizedBox(height: 6),
+                          StatusPill(
+                            stockLabel,
+                            tone: tone,
+                            icon: Icons.circle,
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.money.major(price),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ),
+                            if (discount > 0) ...[
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  widget.money.major(item.effectivePrice),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: context.text.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 40,
+                    child: FilledButton.icon(
+                      onPressed: out ? null : widget.onTap,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: EdgeInsets.zero,
+                      ),
+                      icon: Icon(
+                        out
+                            ? Icons.remove_shopping_cart_outlined
+                            : Icons.add_shopping_cart_rounded,
+                        size: 18,
+                      ),
+                      label: Text(out ? 'Out of stock' : 'Add to cart'),
                     ),
                   ),
                 ],
@@ -834,17 +900,6 @@ class _ProductTileState extends State<_ProductTile> {
       ),
     );
   }
-}
-
-class _Initial extends StatelessWidget {
-  const _Initial(this.name, this.color);
-  final String name;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Text(
-    name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-    style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 17),
-  );
 }
 
 class _CartPanel extends ConsumerWidget {
@@ -1220,9 +1275,11 @@ class _CartLineTile extends StatelessWidget {
     return InkWell(
       onTap: onEdit,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
+        padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
         child: Row(
           children: [
+            ProductThumb(name: product.name, path: product.imagePath, size: 42),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

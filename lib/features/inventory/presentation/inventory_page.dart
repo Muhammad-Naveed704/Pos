@@ -99,8 +99,8 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             tabs: const [
-              Tab(icon: Icon(Icons.inventory_2_outlined), text: 'Stock'),
-              Tab(icon: Icon(Icons.history_rounded), text: 'Movements'),
+              AppTab(icon: Icons.inventory_2_outlined, text: 'Stock'),
+              AppTab(icon: Icons.history_rounded, text: 'Movements'),
             ],
           ),
           const SizedBox(height: 12),
@@ -287,22 +287,87 @@ class _StockTabState extends ConsumerState<_StockTab>
                     message: 'Only products that track stock are listed.',
                   );
                 }
-                return ListView.separated(
-                  itemCount: rows.length,
-                  separatorBuilder: (_, _) => const Divider(),
-                  itemBuilder: (context, index) => _StockTile(
-                    row: rows[index],
-                    money: money,
-                    showCost: canCost,
-                    canAdjust: canAdjust,
-                    onHistory: () => widget.onHistory(rows[index]),
-                  ),
+                return Column(
+                  children: [
+                    _StockHeader(showCost: canCost),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: rows.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) => _StockTile(
+                          row: rows[index],
+                          money: money,
+                          showCost: canCost,
+                          canAdjust: canAdjust,
+                          onHistory: () => widget.onHistory(rows[index]),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Showing ${rows.length} product${rows.length == 1 ? '' : 's'}',
+                        style: context.text.bodySmall?.copyWith(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
                 );
               },
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _StockHeader extends StatelessWidget {
+  const _StockHeader({required this.showCost});
+  final bool showCost;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = context.text.labelLarge?.copyWith(
+      fontWeight: FontWeight.w800,
+      color: context.colors.onSurfaceVariant,
+    );
+    return Container(
+      color: context.colors.surfaceContainerLow,
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+      child: Row(
+        children: [
+          Expanded(flex: 4, child: Text('Product', style: style)),
+          Expanded(flex: 2, child: Text('SKU', style: style)),
+          Expanded(flex: 2, child: Text('Category', style: style)),
+          SizedBox(width: 120, child: Text('Stock', style: style)),
+          SizedBox(
+            width: 80,
+            child: Text(
+              'Reorder at',
+              style: style,
+              textAlign: TextAlign.center,
+            ),
+          ),
+          if (showCost)
+            SizedBox(
+              width: 120,
+              child: Text('Cost value', style: style, textAlign: TextAlign.end),
+            ),
+          SizedBox(
+            width: 120,
+            child: Text('Retail value', style: style, textAlign: TextAlign.end),
+          ),
+          const SizedBox(width: 18),
+          SizedBox(width: 124, child: Text('Status', style: style)),
+          const SizedBox(width: 52),
+        ],
+      ),
     );
   }
 }
@@ -341,57 +406,101 @@ class _StockTile extends ConsumerWidget {
           children: [
             Expanded(
               flex: 4,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
+                  ProductThumb(name: row.name, path: row.imagePath, size: 42),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
                           row.name,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                      ),
-                      if (!row.isActive) ...[
-                        const SizedBox(width: 6),
-                        const StatusPill('Inactive'),
+                        Text(
+                          row.unit,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
                       ],
-                    ],
-                  ),
-                  Text(
-                    [row.sku, ?row.category].join(' · '),
-                    style: context.text.bodySmall?.copyWith(
-                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
                 ],
               ),
             ),
-            SizedBox(
-              width: 140,
+            Expanded(flex: 2, child: Text(row.sku)),
+            Expanded(
+              flex: 2,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: StatusPill('${_qty(row.stock)} ${row.unit}', tone: tone),
+                child: row.category == null
+                    ? Text(
+                        '—',
+                        style: TextStyle(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      )
+                    : StatusPill(row.category!, tone: PillTone.info),
               ),
             ),
             SizedBox(
-              width: 110,
-              child: Text(
-                'Reorder at ${_qty(row.reorderLevel)}',
-                style: context.text.bodySmall,
+              width: 120,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: StatusPill('${_qty(row.stock)} in stock', tone: tone),
               ),
+            ),
+            SizedBox(
+              width: 80,
+              child: Text(_qty(row.reorderLevel), textAlign: TextAlign.center),
             ),
             if (showCost)
               SizedBox(
-                width: 140,
+                width: 120,
                 child: Text(
                   money.major(row.stock > 0 ? row.stock * row.costPrice : 0),
                   textAlign: TextAlign.end,
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
-            const SizedBox(width: 8),
+            SizedBox(
+              width: 120,
+              child: Text(
+                money.major(row.stock > 0 ? row.stock * row.salePrice : 0),
+                textAlign: TextAlign.end,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 18),
+            SizedBox(
+              width: 124,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: !row.isActive
+                    ? const StatusPill('Inactive', icon: Icons.circle)
+                    : row.isOut
+                    ? const StatusPill(
+                        'Out of stock',
+                        tone: PillTone.danger,
+                        icon: Icons.circle,
+                      )
+                    : row.isLow
+                    ? const StatusPill(
+                        'Low stock',
+                        tone: PillTone.warning,
+                        icon: Icons.circle,
+                      )
+                    : const StatusPill(
+                        'In stock',
+                        tone: PillTone.success,
+                        icon: Icons.circle,
+                      ),
+              ),
+            ),
+            const SizedBox(width: 4),
             PopupMenuButton<String>(
               tooltip: 'Actions',
               onSelected: (action) async {

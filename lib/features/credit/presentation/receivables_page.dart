@@ -262,6 +262,13 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
                                         ? 'Nothing overdue'
                                         : 'No customer owes money',
                                     message: 'Credit and partial sales appear here until they are paid.',
+                                    action: OutlinedButton.icon(
+                                      onPressed: () => context.go('/customers'),
+                                      icon: const Icon(
+                                        Icons.people_alt_outlined,
+                                      ),
+                                      label: const Text('View all customers'),
+                                    ),
                                   )
                                 : ListView.separated(
                                     itemCount: debtors.length,

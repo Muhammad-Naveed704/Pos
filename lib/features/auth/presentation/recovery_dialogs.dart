@@ -68,10 +68,10 @@ class _RecoveryKeyDialogState extends State<_RecoveryKeyDialog> {
               label: const Text('Copy'),
             ),
           ),
-          CheckboxListTile(
+          SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _saved,
-            onChanged: (value) => setState(() => _saved = value ?? false),
+            onChanged: (value) => setState(() => _saved = value),
             title: const Text('I have saved this key somewhere safe'),
           ),
         ],

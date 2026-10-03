@@ -92,7 +92,6 @@ class _AppSelectState<T> extends State<AppSelect<T>> {
       initialSelection: widget.value,
       label: widget.label == null ? null : Text(widget.label!),
       hintText: widget.hint,
-      helperText: widget.helperText,
       leadingIcon: selectedIcon == null ? null : Icon(selectedIcon, size: 20),
       enableFilter: searchable,
       enableSearch: true,
@@ -135,9 +134,29 @@ class _AppSelectState<T> extends State<AppSelect<T>> {
           ),
       ],
     );
-    return widget.width == null
+    final sized = widget.width == null
         ? menu
         : SizedBox(width: widget.width, child: menu);
+    // Helper text sits below the field: inside DropdownMenu it shared the
+    // fixed field height and squashed the input.
+    final helper = widget.helperText;
+    if (helper == null) return sized;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        sized,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 12, 0),
+          child: Text(
+            helper,
+            style: context.text.bodySmall?.copyWith(
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -229,7 +248,7 @@ class AppSegmented<T> extends StatelessWidget {
       return expand ? Expanded(child: wrapped) : wrapped;
     }
 
-    return Container(
+    final control = Container(
       height: height,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
@@ -271,6 +290,17 @@ class AppSegmented<T> extends StatelessWidget {
         },
       ),
     );
+    // When a parent stretches us (e.g. a Column with stretch), keep the
+    // natural width: the thumb is sized from our width, so a stretched
+    // control left the thumb misaligned with the segments.
+    return expand
+        ? control
+        : Align(
+            alignment: AlignmentDirectional.centerStart,
+            widthFactor: 1,
+            heightFactor: 1,
+            child: control,
+          );
   }
 }
 
@@ -643,4 +673,20 @@ class _DateRangeButtonState extends State<DateRangeButton> {
       ),
     );
   }
+}
+
+/// Tab with the icon beside the label (compact, like a toolbar).
+class AppTab extends StatelessWidget {
+  const AppTab({required this.icon, required this.text, super.key});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Tab(
+    height: 42,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [Icon(icon, size: 20), const SizedBox(width: 8), Text(text)],
+    ),
+  );
 }

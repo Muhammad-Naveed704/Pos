@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/ui/ui_kit.dart';
 import '../../settings/data/business_settings_repository.dart';
@@ -73,10 +74,16 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   String _search = '';
+  bool? _active;
+  _CustomerSort _sort = _CustomerSort.name;
+
   @override
   Widget build(BuildContext context) {
     final repository = ref.watch(customerRepositoryProvider);
+    final session = ref.watch(activeSessionProvider)!;
+    final money = ref.watch(moneyFormatterProvider);
     final balances = ref.watch(customerBalancesProvider).value ?? const {};
+    final stats = ref.watch(customerStatsProvider).value ?? const {};
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -84,12 +91,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
         children: [
           PageHeader(
             title: 'Customers',
-            subtitle: 'Profiles, loyalty and purchase summaries.',
+            subtitle: 'Profiles, loyalty, balances and purchase history.',
             actions: [
               DataMenu(
-                canImport: ref
-                    .watch(activeSessionProvider)!
-                    .can(Permissions.customersCreate),
+                canImport: session.can(Permissions.customersCreate),
                 onImport: () => _import(context),
                 onTemplate: () => saveCsvFile(
                   CustomerImportService.template(),
@@ -97,9 +102,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                 ),
                 onExport: () => _export(context),
               ),
-              if (ref
-                  .watch(activeSessionProvider)!
-                  .can(Permissions.customersCreate))
+              if (session.can(Permissions.customersCreate))
                 FilledButton.icon(
                   onPressed: () => _edit(context),
                   icon: const Icon(Icons.person_add_alt_1_rounded),
@@ -108,91 +111,270 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
             ],
           ),
           const SizedBox(height: 16),
-          TextField(
+          SearchField(
+            hint: 'Search customers by name or phone number',
             onChanged: (value) => setState(() => _search = value),
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Search name or phone',
-            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              for (final (value, label, icon) in const [
+                (null, 'All customers', Icons.groups_outlined),
+                (true, 'Active', Icons.circle),
+                (false, 'Inactive', Icons.circle_outlined),
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    avatar: Icon(
+                      icon,
+                      size: icon == Icons.groups_outlined ? 18 : 10,
+                      color: value == true
+                          ? context.tokens.success
+                          : value == false
+                          ? context.colors.outline
+                          : null,
+                    ),
+                    label: Text(label),
+                    selected: _active == value,
+                    onSelected: (_) => setState(() => _active = value),
+                  ),
+                ),
+              const Spacer(),
+              AppSelect<_CustomerSort>(
+                width: 210,
+                label: 'Sort by',
+                icon: Icons.swap_vert_rounded,
+                items: [
+                  for (final sort in _CustomerSort.values)
+                    SelectItem(sort, sort.label),
+                ],
+                value: _sort,
+                onChanged: (value) =>
+                    setState(() => _sort = value ?? _CustomerSort.name),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           Expanded(
-            child: Card(
-              child: CachedStreamBuilder<List<Customer>>(
-                keys: [_search],
-                create: () => repository.watchAll(search: _search),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final customers = snapshot.data!;
-                  if (customers.isEmpty) {
-                    return const Center(child: Text('No customers found.'));
-                  }
-                  return ListView.separated(
-                    itemCount: customers.length,
-                    separatorBuilder: (_, _) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final customer = customers[index];
-                      final owes = balances[customer.id] ?? 0;
-                      return ListTile(
-                        onTap: () => context.go('/customers/${customer.id}'),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 6,
-                        ),
-                        leading: CircleAvatar(
-                          child: Text(
-                            customer.name.characters.first.toUpperCase(),
-                          ),
-                        ),
-                        title: Text(
-                          customer.name,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(
-                          [
-                                customer.phone,
-                                customer.email,
-                                '${customer.loyaltyPoints} points',
-                              ]
-                              .whereType<String>()
-                              .where((value) => value.isNotEmpty)
-                              .join(' · '),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (owes > 0.004) ...[
-                              StatusPill(
-                                'Owes ${ref.watch(moneyFormatterProvider).major(owes)}',
-                                tone: PillTone.warning,
-                                icon: Icons.account_balance_wallet_outlined,
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            Chip(
-                              label: Text(
-                                customer.isActive ? 'Active' : 'Inactive',
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => _showSummary(context, customer),
-                              tooltip: 'Purchase summary',
-                              icon: const Icon(Icons.receipt_long_outlined),
-                            ),
-                            IconButton(
-                              onPressed: () =>
-                                  _edit(context, customer: customer),
-                              icon: const Icon(Icons.edit_outlined),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+            child: CachedStreamBuilder<List<Customer>>(
+              keys: [_search],
+              create: () => repository.watchAll(search: _search),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Card(
+                    child: EmptyState(
+                      icon: Icons.error_outline_rounded,
+                      title: 'Customers could not be loaded',
+                      message: friendlyError(snapshot.error!),
+                    ),
                   );
-                },
-              ),
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final all = snapshot.data!;
+                final customers =
+                    all
+                        .where((c) => _active == null || c.isActive == _active)
+                        .toList()
+                      ..sort((a, b) {
+                        final sa = stats[a.id], sb = stats[b.id];
+                        return switch (_sort) {
+                          _CustomerSort.name => a.name.toLowerCase().compareTo(
+                            b.name.toLowerCase(),
+                          ),
+                          _CustomerSort.newest => b.createdAt.compareTo(
+                            a.createdAt,
+                          ),
+                          _CustomerSort.spend => (sb?.total ?? 0).compareTo(
+                            sa?.total ?? 0,
+                          ),
+                          _CustomerSort.recent =>
+                            (sb?.lastPurchase ?? DateTime(1970)).compareTo(
+                              sa?.lastPurchase ?? DateTime(1970),
+                            ),
+                          _CustomerSort.balance =>
+                            (balances[b.id] ?? 0).compareTo(
+                              balances[a.id] ?? 0,
+                            ),
+                          _CustomerSort.points => b.loyaltyPoints.compareTo(
+                            a.loyaltyPoints,
+                          ),
+                        };
+                      });
+                return AppTable(
+                  columns: const [
+                    AppColumn('Customer', flex: 4),
+                    AppColumn('Phone number', flex: 3),
+                    AppColumn('Loyalty points', flex: 2),
+                    AppColumn('Total purchases', flex: 3),
+                    AppColumn('Last purchase', flex: 3),
+                    AppColumn('Balance', flex: 2, numeric: true),
+                    AppColumn('Status', flex: 2),
+                    AppColumn('Actions', width: 110, center: true),
+                  ],
+                  rowCount: customers.length,
+                  rowHeight: 70,
+                  onTap: (index) =>
+                      context.go('/customers/${customers[index].id}'),
+                  empty: EmptyState(
+                    compact: true,
+                    icon: Icons.person_search_rounded,
+                    title: all.isEmpty && _search.isEmpty
+                        ? 'No customers yet'
+                        : 'No customers found',
+                    message: all.isEmpty && _search.isEmpty
+                        ? 'Add customers to track loyalty and credit.'
+                        : 'Try another name or phone number.',
+                  ),
+                  footer: Text(
+                    'Showing ${customers.length} of ${all.length} customers',
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                  cells: (context, index) {
+                    final customer = customers[index];
+                    final stat = stats[customer.id];
+                    final owes = balances[customer.id] ?? 0;
+                    final muted = context.text.bodySmall?.copyWith(
+                      color: context.colors.onSurfaceVariant,
+                    );
+                    return [
+                      Row(
+                        children: [
+                          NameAvatar(customer.name),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  customer.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                Text(
+                                  customer.email?.isNotEmpty ?? false
+                                      ? customer.email!
+                                      : 'Since ${DateFormat('MMM y').format(customer.createdAt)}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: muted,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.call_outlined,
+                            size: 16,
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              customer.phone?.isNotEmpty ?? false
+                                  ? customer.phone!
+                                  : '—',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: StatusPill(
+                          '${customer.loyaltyPoints} pts',
+                          tone: customer.loyaltyPoints > 0
+                              ? PillTone.primary
+                              : PillTone.neutral,
+                          icon: Icons.workspace_premium_rounded,
+                        ),
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            money.major(stat?.total ?? 0),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          Text(
+                            '${stat?.orders ?? 0} order${(stat?.orders ?? 0) == 1 ? '' : 's'}',
+                            style: muted,
+                          ),
+                        ],
+                      ),
+                      stat?.lastPurchase == null
+                          ? Text('No purchases yet', style: muted)
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  DateFormat('d MMM y')
+                                      .format(stat!.lastPurchase!),
+                                ),
+                                Text(
+                                  DateFormat('h:mm a')
+                                      .format(stat.lastPurchase!),
+                                  style: muted,
+                                ),
+                              ],
+                            ),
+                      owes > 0.004
+                          ? FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                money.major(owes),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: context.tokens.warning,
+                                ),
+                              ),
+                            )
+                          : Text('—', style: muted),
+                      customer.isActive
+                          ? const StatusPill(
+                              'Active',
+                              tone: PillTone.success,
+                              icon: Icons.circle,
+                            )
+                          : const StatusPill(
+                              'Inactive',
+                              tone: PillTone.danger,
+                              icon: Icons.circle,
+                            ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton.outlined(
+                            tooltip: 'Purchase summary',
+                            onPressed: () => _showSummary(context, customer),
+                            icon: const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          IconButton.outlined(
+                            tooltip: 'Edit',
+                            onPressed: () => _edit(context, customer: customer),
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                          ),
+                        ],
+                      ),
+                    ];
+                  },
+                );
+              },
             ),
           ),
         ],
@@ -247,4 +429,16 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
 
   Future<void> _edit(BuildContext context, {Customer? customer}) =>
       editCustomer(context, ref, customer: customer);
+}
+
+enum _CustomerSort {
+  name('Name (A–Z)'),
+  newest('Newest first'),
+  spend('Top spenders'),
+  recent('Last purchase'),
+  balance('Highest balance'),
+  points('Most points');
+
+  const _CustomerSort(this.label);
+  final String label;
 }

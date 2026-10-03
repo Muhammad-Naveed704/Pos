@@ -42,9 +42,9 @@ class UsersPage extends ConsumerWidget {
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: [
-                Tab(icon: Icon(Icons.people_alt_outlined), text: 'Users'),
-                Tab(
-                  icon: Icon(Icons.admin_panel_settings_outlined),
+                AppTab(icon: Icons.people_alt_outlined, text: 'Users'),
+                AppTab(
+                  icon: Icons.admin_panel_settings_outlined,
                   text: 'Roles & permissions',
                 ),
               ],
@@ -65,90 +65,236 @@ class UsersPage extends ConsumerWidget {
   }
 }
 
-class _UsersList extends ConsumerWidget {
+class _UsersList extends ConsumerStatefulWidget {
   const _UsersList({required this.canManage});
   final bool canManage;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_UsersList> createState() => _UsersListState();
+}
+
+IconData roleIcon(String role) => switch (role.toLowerCase()) {
+  'owner' => Icons.workspace_premium_rounded,
+  'admin' => Icons.admin_panel_settings_outlined,
+  'manager' => Icons.insights_rounded,
+  'cashier' => Icons.point_of_sale_rounded,
+  'inventory staff' => Icons.inventory_2_outlined,
+  _ => Icons.badge_outlined,
+};
+
+class _UsersListState extends ConsumerState<_UsersList> {
+  String _search = '';
+  String? _role;
+  bool? _active;
+
+  @override
+  Widget build(BuildContext context) {
     final session = ref.watch(activeSessionProvider)!;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: CachedStreamBuilder<List<UserWithRole>>(
-        keys: [session.user.id, session.store.id],
-        create: () => ref.read(userRepositoryProvider).watchAll(session),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return EmptyState(
+    return CachedStreamBuilder<List<UserWithRole>>(
+      keys: [session.user.id, session.store.id],
+      create: () => ref.read(userRepositoryProvider).watchAll(session),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Card(
+            child: EmptyState(
               icon: Icons.error_outline_rounded,
               title: 'Users could not be loaded',
               message: friendlyError(snapshot.error!),
-            );
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final users = snapshot.data!;
-          return ListView.separated(
-            itemCount: users.length,
-            separatorBuilder: (_, _) => const Divider(),
-            itemBuilder: (context, index) {
-              final item = users[index];
-              final user = item.user;
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 6,
+            ),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final all = snapshot.data!;
+        final roles = {for (final u in all) u.role.name}.toList()..sort();
+        final term = _search.trim().toLowerCase();
+        final users = all.where((u) {
+          if (_role != null && u.role.name != _role) return false;
+          if (_active != null && u.user.isActive != _active) return false;
+          if (term.isEmpty) return true;
+          return u.user.displayName.toLowerCase().contains(term) ||
+              u.user.username.toLowerCase().contains(term) ||
+              u.role.name.toLowerCase().contains(term);
+        }).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SearchField(
+                  width: 360,
+                  hint: 'Search users by name, username or role',
+                  onChanged: (value) => setState(() => _search = value),
                 ),
-                leading: CircleAvatar(
-                  backgroundColor: context.colors.primaryContainer,
-                  child: Text(
-                    user.displayName.isEmpty
-                        ? '?'
-                        : user.displayName.characters.first.toUpperCase(),
+                const Spacer(),
+                AppSelect<String?>(
+                  width: 190,
+                  label: 'Role',
+                  items: [
+                    const SelectItem(null, 'All roles'),
+                    for (final role in roles)
+                      SelectItem(role, role, icon: roleIcon(role)),
+                  ],
+                  value: _role,
+                  onChanged: (value) => setState(() => _role = value),
+                ),
+                const SizedBox(width: 10),
+                AppSelect<bool?>(
+                  width: 170,
+                  label: 'Status',
+                  items: const [
+                    SelectItem(null, 'All status'),
+                    SelectItem(true, 'Active'),
+                    SelectItem(false, 'Inactive'),
+                  ],
+                  value: _active,
+                  onChanged: (value) => setState(() => _active = value),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: AppTable(
+                columns: const [
+                  AppColumn('User', flex: 4),
+                  AppColumn('Role', flex: 3),
+                  AppColumn('Status', flex: 2),
+                  AppColumn('Last sign-in', flex: 3),
+                  AppColumn('Actions', width: 110, center: true),
+                ],
+                rowCount: users.length,
+                rowHeight: 72,
+                onTap: widget.canManage
+                    ? (index) =>
+                          showUserEditor(context, ref, item: users[index])
+                    : null,
+                empty: const EmptyState(
+                  compact: true,
+                  icon: Icons.person_search_rounded,
+                  title: 'No users match these filters',
+                ),
+                footer: Text(
+                  'Showing ${users.length} of ${all.length} users',
+                  style: context.text.bodySmall?.copyWith(
+                    color: context.colors.onSurfaceVariant,
                   ),
                 ),
-                title: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        user.displayName,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                cells: (context, index) {
+                  final item = users[index];
+                  final user = item.user;
+                  return [
+                    Row(
+                      children: [
+                        NameAvatar(user.displayName),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      user.displayName,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  if (user.id == session.user.id) ...[
+                                    const SizedBox(width: 8),
+                                    const StatusPill(
+                                      'You',
+                                      tone: PillTone.primary,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              Text(
+                                '@${user.username}',
+                                style: context.text.bodySmall?.copyWith(
+                                  color: context.colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.colors.primaryContainer.withValues(
+                          alpha: 0.6,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            roleIcon(item.role.name),
+                            size: 16,
+                            color: context.colors.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            item.role.name,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: context.colors.primary,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    if (user.id == session.user.id) ...[
-                      const SizedBox(width: 8),
-                      const StatusPill('You', tone: PillTone.primary),
-                    ],
-                  ],
-                ),
-                subtitle: Text(
-                  '@${user.username} · ${item.role.name}'
-                  '${user.lastLoginAt == null ? '' : ' · last sign-in ${DateFormat('d MMM, h:mm a').format(user.lastLoginAt!)}'}',
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
                     user.isActive
-                        ? const StatusPill('Active', tone: PillTone.success)
-                        : const StatusPill('Inactive'),
-                    if (canManage) ...[
-                      const SizedBox(width: 6),
-                      IconButton(
-                        tooltip: 'Edit / reset password',
-                        onPressed: () =>
-                            showUserEditor(context, ref, item: item),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
-          );
-        },
-      ),
+                        ? const StatusPill(
+                            'Active',
+                            tone: PillTone.success,
+                            icon: Icons.circle,
+                          )
+                        : const StatusPill('Inactive', icon: Icons.circle),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          user.lastLoginAt == null
+                              ? 'Never'
+                              : DateFormat('d MMM y, h:mm a')
+                                    .format(user.lastLoginAt!),
+                        ),
+                        Text(
+                          'Last sign-in',
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                    widget.canManage
+                        ? IconButton.outlined(
+                            tooltip: 'Edit / reset password',
+                            onPressed: () =>
+                                showUserEditor(context, ref, item: item),
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                          )
+                        : const SizedBox.shrink(),
+                  ];
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

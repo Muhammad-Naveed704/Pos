@@ -16,13 +16,17 @@ import '../data/product_repository.dart';
 import 'product_editor.dart';
 
 class ProductsPage extends ConsumerStatefulWidget {
-  const ProductsPage({super.key});
+  const ProductsPage({this.initialSearch = '', super.key});
+
+  /// From the top-bar search (`/products?q=`).
+  final String initialSearch;
   @override
   ConsumerState<ProductsPage> createState() => _ProductsPageState();
 }
 
 class _ProductsPageState extends ConsumerState<ProductsPage> {
-  String _search = '';
+  late String _search = widget.initialSearch;
+  late final _searchController = TextEditingController(text: _search);
   int _page = 0;
   Timer? _debounce;
   static const _pageSize = 50;
@@ -35,8 +39,21 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   });
 
   @override
+  void didUpdateWidget(ProductsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialSearch != widget.initialSearch) {
+      _searchController.text = widget.initialSearch;
+      _reload(() {
+        _search = widget.initialSearch;
+        _page = 0;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _debounce?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -50,6 +67,33 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           page: _page,
           pageSize: _pageSize,
         );
+  }
+
+  Widget _status(CatalogProduct item) {
+    if (!item.product.isActive || !item.store.isAvailable) {
+      return const StatusPill('Inactive', icon: Icons.circle);
+    }
+    if (item.product.trackInventory) {
+      if (item.store.stockQty <= 0) {
+        return const StatusPill(
+          'Out of stock',
+          tone: PillTone.danger,
+          icon: Icons.circle,
+        );
+      }
+      if (item.store.stockQty <= item.store.reorderLevel) {
+        return const StatusPill(
+          'Low stock',
+          tone: PillTone.warning,
+          icon: Icons.circle,
+        );
+      }
+    }
+    return const StatusPill(
+      'Active',
+      tone: PillTone.success,
+      icon: Icons.circle,
+    );
   }
 
   @override
@@ -86,6 +130,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         ),
         const SizedBox(height: 16),
         TextField(
+          controller: _searchController,
           onChanged: (value) {
             _debounce?.cancel();
             _debounce = Timer(const Duration(milliseconds: 220), () {
@@ -105,158 +150,213 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         const SizedBox(height: 14),
         Expanded(
           child: Card(
-            child: FutureBuilder<List<CatalogProduct>>(
-              future: _rows,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return EmptyState(
-                    icon: Icons.error_outline_rounded,
-                    title: 'Products could not be loaded',
-                    message: friendlyError(snapshot.error!),
-                  );
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final rows = snapshot.data!;
-                final money = ref.watch(moneyFormatterProvider);
-                if (rows.isEmpty) {
-                  return EmptyState(
-                    icon: Icons.inventory_2_outlined,
-                    title: _search.isEmpty && _page == 0
-                        ? 'No products yet'
-                        : 'No products found',
-                    message: _search.isEmpty
-                        ? 'Create your first product to start selling.'
-                        : 'Try a different SKU, barcode or name.',
-                  );
-                }
-                return SingleChildScrollView(
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('Product')),
-                        DataColumn(label: Text('SKU / Barcode')),
-                        DataColumn(label: Text('Price'), numeric: true),
-                        DataColumn(label: Text('Stock'), numeric: true),
-                        DataColumn(label: Text('Status')),
-                        DataColumn(label: Text('')),
-                      ],
-                      rows: rows
-                          .map(
-                            (item) => DataRow(
-                              cells: [
-                                DataCell(
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.product.name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w700,
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                Expanded(
+                  child: FutureBuilder<List<CatalogProduct>>(
+                    future: _rows,
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return EmptyState(
+                          icon: Icons.error_outline_rounded,
+                          title: 'Products could not be loaded',
+                          message: friendlyError(snapshot.error!),
+                        );
+                      }
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final rows = snapshot.data!;
+                      final money = ref.watch(moneyFormatterProvider);
+                      if (rows.isEmpty) {
+                        return EmptyState(
+                          icon: Icons.inventory_2_outlined,
+                          title: _search.isEmpty && _page == 0
+                              ? 'No products yet'
+                              : 'No products found',
+                          message: _search.isEmpty
+                              ? 'Create your first product to start selling.'
+                              : 'Try a different SKU, barcode or name.',
+                        );
+                      }
+                      return SingleChildScrollView(
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: DataTable(
+                            columns: const [
+                              DataColumn(label: Text('Product')),
+                              DataColumn(label: Text('SKU / Barcode')),
+                              DataColumn(label: Text('Price'), numeric: true),
+                              DataColumn(label: Text('Stock'), numeric: true),
+                              DataColumn(label: Text('Status')),
+                              DataColumn(label: Text('')),
+                            ],
+                            rows: rows
+                                .map(
+                                  (item) => DataRow(
+                                    cells: [
+                                      DataCell(
+                                        Row(
+                                          children: [
+                                            ProductThumb(
+                                              name: item.product.name,
+                                              path: item.product.imagePath,
+                                              size: 44,
+                                            ),
+                                            const SizedBox(width: 14),
+                                            Flexible(
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    item.product.name,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    item.category?.name ??
+                                                        'Uncategorized',
+                                                    style: context
+                                                        .text
+                                                        .bodySmall
+                                                        ?.copyWith(
+                                                          color: context
+                                                              .colors
+                                                              .onSurfaceVariant,
+                                                        ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
                                         ),
+                                        onTap: () =>
+                                            _action(context, 'edit', item),
                                       ),
-                                      if (item.category != null)
+                                      DataCell(
                                         Text(
-                                          item.category!.name,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .labelSmall,
+                                          '${item.product.sku}${item.product.barcode == null ? '' : '\n${item.product.barcode}'}',
                                         ),
-                                    ],
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    '${item.product.sku}${item.product.barcode == null ? '' : '\n${item.product.barcode}'}',
-                                  ),
-                                ),
-                                DataCell(
-                                  Text(
-                                    money.major(item.effectivePrice),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                DataCell(
-                                  !item.product.trackInventory
-                                      ? const Text('—')
-                                      : StatusPill(
-                                          '${_qty(item.store.stockQty)} ${item.product.unit}',
-                                          tone: item.store.stockQty <= 0
-                                              ? PillTone.danger
-                                              : item.store.stockQty <=
-                                                    item.store.reorderLevel
-                                              ? PillTone.warning
-                                              : PillTone.success,
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          money.major(item.effectivePrice),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                         ),
-                                ),
-                                DataCell(
-                                  item.product.isActive &&
-                                          item.store.isAvailable
-                                      ? const StatusPill(
-                                          'Active',
-                                          tone: PillTone.success,
-                                        )
-                                      : const StatusPill('Inactive'),
-                                ),
-                                DataCell(
-                                  PopupMenuButton<String>(
-                                    onSelected: (value) =>
-                                        _action(context, value, item),
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(
-                                        value: 'edit',
-                                        child: Text('Edit'),
                                       ),
-                                      PopupMenuItem(
-                                        value: 'duplicate',
-                                        child: Text('Duplicate'),
+                                      DataCell(
+                                        !item.product.trackInventory
+                                            ? const Text('—')
+                                            : StatusPill(
+                                                '${_qty(item.store.stockQty)} in stock',
+                                                tone: item.store.stockQty <= 0
+                                                    ? PillTone.danger
+                                                    : item.store.stockQty <=
+                                                          item
+                                                              .store
+                                                              .reorderLevel
+                                                    ? PillTone.warning
+                                                    : PillTone.success,
+                                              ),
                                       ),
-                                      PopupMenuItem(
-                                        value: 'toggle',
-                                        child: Text('Activate / deactivate'),
+                                      DataCell(_status(item)),
+                                      DataCell(
+                                        PopupMenuButton<String>(
+                                          onSelected: (value) =>
+                                              _action(context, value, item),
+                                          itemBuilder: (_) => const [
+                                            PopupMenuItem(
+                                              value: 'edit',
+                                              child: Text('Edit'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'duplicate',
+                                              child: Text('Duplicate'),
+                                            ),
+                                            PopupMenuItem(
+                                              value: 'toggle',
+                                              child: Text(
+                                                'Activate / deactivate',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),
-                                ),
-                              ],
-                            ),
-                          )
-                          .toList(),
-                    ),
+                                )
+                                .toList(),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      FutureBuilder<List<CatalogProduct>>(
+                        future: _rows,
+                        builder: (context, snapshot) {
+                          final count = snapshot.data?.length ?? 0;
+                          return Text(
+                            count == 0
+                                ? ''
+                                : 'Showing ${_page * _pageSize + 1} to ${_page * _pageSize + count} products',
+                            style: context.text.bodyMedium?.copyWith(
+                              color: context.colors.onSurfaceVariant,
+                            ),
+                          );
+                        },
+                      ),
+                      const Spacer(),
+                      OutlinedButton(
+                        onPressed: _page == 0
+                            ? null
+                            : () => _reload(() => _page -= 1),
+                        child: const Text('Previous'),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: FilledButton(
+                          onPressed: () {},
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(44, 44),
+                          ),
+                          child: Text('${_page + 1}'),
+                        ),
+                      ),
+                      FutureBuilder<List<CatalogProduct>>(
+                        future: _rows,
+                        builder: (context, snapshot) => OutlinedButton(
+                          onPressed: (snapshot.data?.length ?? 0) < _pageSize
+                              ? null
+                              : () => _reload(() => _page += 1),
+                          child: const Text('Next'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            OutlinedButton(
-              onPressed: _page == 0 ? null : () => _reload(() => _page -= 1),
-              child: const Text('Previous'),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Text('Page ${_page + 1}'),
-            ),
-            FutureBuilder<List<CatalogProduct>>(
-              future: _rows,
-              builder: (context, snapshot) => OutlinedButton(
-                onPressed: (snapshot.data?.length ?? 0) < _pageSize
-                    ? null
-                    : () => _reload(() => _page += 1),
-                child: const Text('Next'),
-              ),
-            ),
-          ],
         ),
       ],
     ),

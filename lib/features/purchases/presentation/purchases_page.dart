@@ -55,11 +55,8 @@ class PurchasesPage extends ConsumerWidget {
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: [
-                Tab(icon: Icon(Icons.receipt_long_outlined), text: 'Purchases'),
-                Tab(
-                  icon: Icon(Icons.local_shipping_outlined),
-                  text: 'Suppliers',
-                ),
+                AppTab(icon: Icons.receipt_long_outlined, text: 'Purchases'),
+                AppTab(icon: Icons.local_shipping_outlined, text: 'Suppliers'),
               ],
             ),
             const SizedBox(height: 12),
@@ -714,13 +711,13 @@ class _PurchaseDocumentDialogState
                                   ),
                                 ],
                               ),
-                              CheckboxListTile(
+                              SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
                                 controlAffinity:
                                     ListTileControlAffinity.leading,
                                 value: _updateCost,
                                 onChanged: (value) =>
-                                    setState(() => _updateCost = value ?? true),
+                                    setState(() => _updateCost = value),
                                 title: const Text(
                                   'Update product cost prices to these costs',
                                 ),

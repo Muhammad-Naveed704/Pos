@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,8 @@ import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
 import '../../scanning/camera_scanner.dart';
 import '../../settings/data/business_settings_repository.dart';
+import '../../categories/data/category_repository.dart';
+import '../data/product_images.dart';
 import '../data/product_repository.dart';
 
 /// Common selling units, internationally understood.
@@ -313,6 +316,112 @@ class _ProductEditorState extends ConsumerState<_ProductEditor> {
     );
   }
 
+  bool _imageBusy = false;
+
+  Future<void> _pickImage() async {
+    final files = await FilePicker.pickFiles(
+      dialogTitle: 'Choose a product image',
+      type: FileType.custom,
+      allowedExtensions: ProductImages.extensions,
+    );
+    final path = files.isEmpty ? null : files.first.path;
+    if (path == null || !mounted) return;
+    setState(() => _imageBusy = true);
+    try {
+      final stored = await ProductImages.import(path);
+      if (mounted) setState(() => _image.text = stored);
+    } catch (error) {
+      if (mounted) Toast.error(context, error);
+    } finally {
+      if (mounted) setState(() => _imageBusy = false);
+    }
+  }
+
+  Widget _imagePanel() {
+    final hasImage = _image.text.trim().isNotEmpty;
+    return SizedBox(
+      width: 210,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 176,
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerLow,
+              borderRadius: context.tokens.borderRadius,
+              border: Border.all(
+                color: context.colors.outlineVariant.withValues(alpha: 0.7),
+              ),
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: _imageBusy
+                      ? const Center(child: CircularProgressIndicator())
+                      : hasImage
+                      ? Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: ProductThumb(
+                            name: _name.text,
+                            path: _image.text.trim(),
+                            size: 156,
+                            fit: BoxFit.contain,
+                          ),
+                        )
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.add_photo_alternate_outlined,
+                              size: 42,
+                              color: context.colors.outline,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'No image',
+                              style: context.text.bodySmall?.copyWith(
+                                color: context.colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                if (hasImage && !_imageBusy)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Remove image',
+                      iconSize: 18,
+                      onPressed: () => setState(() => _image.clear()),
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: context.colors.error,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _imageBusy ? null : _pickImage,
+            icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+            label: Text(hasImage ? 'Change image' : 'Upload image'),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'JPG, PNG or WEBP · resized automatically',
+            textAlign: TextAlign.center,
+            style: context.text.labelSmall?.copyWith(
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _section(String title, IconData icon, List<Widget> children) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 18),
@@ -391,84 +500,120 @@ class _ProductEditorState extends ConsumerState<_ProductEditor> {
                 padding: const EdgeInsets.fromLTRB(24, 18, 24, 6),
                 children: [
                   _section('Basic details', Icons.badge_outlined, [
-                    _row([
-                      _field(
-                        _name,
-                        'Product name *',
-                        errorKey: 'name',
-                        autofocus: true,
-                      ),
-                      _field(
-                        _shortName,
-                        'Short name (receipt)',
-                        helper: 'Optional, shown on small receipts',
-                      ),
-                    ]),
-                    _row([
-                      _field(
-                        _sku,
-                        'SKU *',
-                        errorKey: 'sku',
-                        icon: Icons.tag_rounded,
-                        suffix: IconButton(
-                          tooltip: 'Suggest a SKU from the name',
-                          onPressed: _suggestSku,
-                          icon: const Icon(
-                            Icons.auto_fix_high_rounded,
-                            size: 20,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              _row([
+                                _field(
+                                  _name,
+                                  'Product name *',
+                                  errorKey: 'name',
+                                  autofocus: true,
+                                ),
+                                _field(
+                                  _shortName,
+                                  'Short name (receipt)',
+                                  helper: 'Optional, shown on small receipts',
+                                ),
+                              ]),
+                              _row([
+                                _field(
+                                  _sku,
+                                  'SKU *',
+                                  errorKey: 'sku',
+                                  icon: Icons.tag_rounded,
+                                  suffix: IconButton(
+                                    tooltip: 'Suggest a SKU from the name',
+                                    onPressed: _suggestSku,
+                                    icon: const Icon(
+                                      Icons.auto_fix_high_rounded,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                                _field(
+                                  _barcode,
+                                  'Barcode',
+                                  errorKey: 'barcode',
+                                  icon: Icons.qr_code_2_rounded,
+                                  suffix: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      CameraScanButton(
+                                        onScanned: (code) => setState(() {
+                                          _barcode.text = code;
+                                          _errors.remove('barcode');
+                                        }),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Generate an in-store EAN-13',
+                                        onPressed: _generateBarcode,
+                                        icon: const Icon(
+                                          Icons.autorenew_rounded,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ]),
+                              _row([
+                                AppSelect<String?>(
+                                  label: 'Category',
+                                  icon: Icons.category_outlined,
+                                  value: _categoryId,
+                                  searchable: true,
+                                  items: [
+                                    const SelectItem(null, 'Uncategorized'),
+                                    // "Main › Sub" labels, grouped by main.
+                                    for (final category
+                                        in [...widget.categories]..sort(
+                                          (a, b) =>
+                                              categoryPath(
+                                                a,
+                                                widget.categories,
+                                              ).toLowerCase().compareTo(
+                                                categoryPath(
+                                                  b,
+                                                  widget.categories,
+                                                ).toLowerCase(),
+                                              ),
+                                        ))
+                                      SelectItem(
+                                        category.id,
+                                        categoryPath(
+                                          category,
+                                          widget.categories,
+                                        ),
+                                        icon: category.parentId == null
+                                            ? Icons.category_outlined
+                                            : Icons
+                                                  .subdirectory_arrow_right_rounded,
+                                      ),
+                                  ],
+                                  onChanged: (value) =>
+                                      setState(() => _categoryId = value),
+                                ),
+                                AppSelect<String>(
+                                  label: 'Selling unit',
+                                  icon: Icons.straighten_rounded,
+                                  value: _unit,
+                                  searchable: true,
+                                  items: units,
+                                  onChanged: (value) =>
+                                      setState(() => _unit = value ?? _unit),
+                                ),
+                              ]),
+                            ],
                           ),
                         ),
-                      ),
-                      _field(
-                        _barcode,
-                        'Barcode',
-                        errorKey: 'barcode',
-                        icon: Icons.qr_code_2_rounded,
-                        suffix: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CameraScanButton(
-                              onScanned: (code) => setState(() {
-                                _barcode.text = code;
-                                _errors.remove('barcode');
-                              }),
-                            ),
-                            IconButton(
-                              tooltip: 'Generate an in-store EAN-13',
-                              onPressed: _generateBarcode,
-                              icon: const Icon(
-                                Icons.autorenew_rounded,
-                                size: 20,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ]),
-                    _row([
-                      AppSelect<String?>(
-                        label: 'Category',
-                        icon: Icons.category_outlined,
-                        value: _categoryId,
-                        searchable: true,
-                        items: [
-                          const SelectItem(null, 'Uncategorized'),
-                          for (final category in widget.categories)
-                            SelectItem(category.id, category.name),
-                        ],
-                        onChanged: (value) =>
-                            setState(() => _categoryId = value),
-                      ),
-                      AppSelect<String>(
-                        label: 'Selling unit',
-                        icon: Icons.straighten_rounded,
-                        value: _unit,
-                        searchable: true,
-                        items: units,
-                        onChanged: (value) =>
-                            setState(() => _unit = value ?? _unit),
-                      ),
-                    ]),
+                        const SizedBox(width: 16),
+                        _imagePanel(),
+                      ],
+                    ),
                   ]),
                   _section('Pricing', Icons.sell_outlined, [
                     _row([
@@ -542,11 +687,7 @@ class _ProductEditorState extends ConsumerState<_ProductEditor> {
                           errorKey: 'storeDiscount',
                           percent: true,
                         ),
-                        _field(
-                          _image,
-                          'Image file path (optional)',
-                          icon: Icons.image_outlined,
-                        ),
+                        const SizedBox.shrink(),
                         const SizedBox.shrink(),
                       ]),
                       Wrap(

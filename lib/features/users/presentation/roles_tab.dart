@@ -373,16 +373,16 @@ class _RolesTabState extends ConsumerState<RolesTab>
                 child: () {
                   final current = _current(role);
                   final on = keys.where(current.contains).length;
-                  return Checkbox(
-                    tristate: true,
-                    value: on == 0
-                        ? false
-                        : on == keys.length
-                        ? true
-                        : null,
-                    onChanged: !canManage || role.isOwner
-                        ? null
-                        : (_) => _set(role, keys, on != keys.length),
+                  return Tooltip(
+                    message: '$on of ${keys.length} on',
+                    child: Center(
+                      child: Switch(
+                        value: on == keys.length,
+                        onChanged: !canManage || role.isOwner
+                            ? null
+                            : (_) => _set(role, keys, on != keys.length),
+                      ),
+                    ),
                   );
                 }(),
               ),
@@ -420,11 +420,13 @@ class _RolesTabState extends ConsumerState<RolesTab>
               for (final role in roles)
                 SizedBox(
                   width: _columnWidth,
-                  child: Checkbox(
-                    value: _current(role).contains(item.key),
-                    onChanged: !canManage || role.isOwner
-                        ? null
-                        : (value) => _set(role, [item.key], value ?? false),
+                  child: Center(
+                    child: Switch(
+                      value: _current(role).contains(item.key),
+                      onChanged: !canManage || role.isOwner
+                          ? null
+                          : (value) => _set(role, [item.key], value),
+                    ),
                   ),
                 ),
             ],

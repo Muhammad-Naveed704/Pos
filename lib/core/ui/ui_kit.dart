@@ -5,9 +5,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_tokens.dart';
 
 export '../theme/app_tokens.dart' show AppThemeContext, AppTokens;
+export 'app_table.dart';
 export 'brand_mark.dart';
 export 'cached_stream_builder.dart';
 export 'inputs.dart';
+export 'product_thumb.dart';
 
 /// Standard page title row with optional subtitle and trailing actions.
 class PageHeader extends StatelessWidget {
@@ -325,7 +327,7 @@ class StatusPill extends StatelessWidget {
       PillTone.info => (tokens.infoContainer, tokens.info),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(99),
@@ -334,14 +336,15 @@ class StatusPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 13, color: foreground),
-            const SizedBox(width: 4),
+            // Icons.circle renders as a small status dot.
+            Icon(icon, size: icon == Icons.circle ? 8 : 13, color: foreground),
+            SizedBox(width: icon == Icons.circle ? 6 : 4),
           ],
           Text(
             label,
             style: TextStyle(
               color: foreground,
-              fontSize: 11.5,
+              fontSize: 12,
               fontWeight: FontWeight.w700,
             ),
           ),

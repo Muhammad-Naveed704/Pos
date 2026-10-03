@@ -114,11 +114,11 @@ class _ReceiptDesignerState extends ConsumerState<ReceiptDesigner>
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () {
       if (mounted) {
-        setState(
-          () => _preview = ref
-              .read(receiptServiceProvider)
-              .generateSample(_draft()),
-        );
+        // A block body: an arrow would return the Future to setState,
+        // which asserts in debug builds.
+        setState(() {
+          _preview = ref.read(receiptServiceProvider).generateSample(_draft());
+        });
       }
     });
   }
@@ -329,6 +329,7 @@ class _ReceiptDesignerState extends ConsumerState<ReceiptDesigner>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppSegmented<ReceiptPaper>(
+            expand: true,
             items: [
               for (final paper in ReceiptPaper.values)
                 SegmentItem(paper, paper.label),

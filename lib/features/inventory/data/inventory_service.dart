@@ -35,8 +35,10 @@ class StockRow {
     required this.costPrice,
     required this.salePrice,
     required this.isActive,
+    this.imagePath,
   });
   final String productId;
+  final String? imagePath;
   final String sku;
   final String name;
   final String unit;
@@ -100,8 +102,9 @@ class InventoryService {
   final Uuid _uuid;
 
   static const _stockSelect = '''
-    SELECT p.id, p.sku, p.name, p.unit, p.cost_price, p.sale_price, p.is_active,
-           c.name AS category, ps.stock_qty, ps.reorder_level
+    SELECT p.id, p.sku, p.name, p.unit, p.cost_price,
+           COALESCE(ps.custom_sale_price, p.sale_price) AS sale_price, p.is_active,
+           p.image_path, c.name AS category, ps.stock_qty, ps.reorder_level
     FROM product_stores ps
     JOIN products p ON p.id = ps.product_id
     LEFT JOIN categories c ON c.id = p.category_id
@@ -156,6 +159,7 @@ class InventoryService {
                 costPrice: row.read<double>('cost_price'),
                 salePrice: row.read<double>('sale_price'),
                 isActive: row.read<bool>('is_active'),
+                imagePath: row.readNullable<String>('image_path'),
               ),
           ],
         );

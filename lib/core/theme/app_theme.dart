@@ -53,6 +53,7 @@ abstract final class AppTheme {
       AppDensity.spacious => 54.0,
     };
     final useSeed = settings.source != ColorSource.preset && seed != null;
+    final brand = useSeed ? null : settings.preset.brandColors(dark);
     final subThemes = FlexSubThemesData(
       interactionEffects: true,
       tintedDisabledControls: true,
@@ -86,8 +87,8 @@ abstract final class AppTheme {
     );
     final base = dark
         ? FlexThemeData.dark(
-            scheme: useSeed ? null : settings.preset.scheme,
-            colors: useSeed ? FlexSchemeColor.from(primary: seed) : null,
+            scheme: useSeed || brand != null ? null : settings.preset.scheme,
+            colors: useSeed ? FlexSchemeColor.from(primary: seed) : brand,
             keyColors: useSeed
                 ? const FlexKeyColors(useSecondary: true, useTertiary: true)
                 : null,
@@ -100,14 +101,17 @@ abstract final class AppTheme {
             fontFamily: settings.fontFamily,
           )
         : FlexThemeData.light(
-            scheme: useSeed ? null : settings.preset.scheme,
-            colors: useSeed ? FlexSchemeColor.from(primary: seed) : null,
+            scheme: useSeed || brand != null ? null : settings.preset.scheme,
+            colors: useSeed ? FlexSchemeColor.from(primary: seed) : brand,
             keyColors: useSeed
                 ? const FlexKeyColors(useSecondary: true, useTertiary: true)
                 : null,
             variant: useSeed ? FlexSchemeVariant.tonalSpot : null,
             surfaceMode: FlexSurfaceMode.levelSurfacesLowScaffold,
-            blendLevel: settings.surfaceTint,
+            // The orange brand tints strongly; keep light surfaces near white.
+            blendLevel: brand != null
+                ? (settings.surfaceTint / 3).round()
+                : settings.surfaceTint,
             subThemesData: subThemes,
             visualDensity: density,
             fontFamily: settings.fontFamily,
@@ -128,10 +132,15 @@ abstract final class AppTheme {
       radius: radius,
       gap: gap,
       motionFactor: settings.animationLevel.factor,
-      sidebar: Color.alphaBlend(
-        scheme.primary.withValues(alpha: dark ? 0.06 : 0.035),
-        scheme.surfaceContainerLow,
-      ),
+      sidebar: dark
+          ? Color.alphaBlend(
+              scheme.primary.withValues(alpha: 0.06),
+              scheme.surfaceContainerLow,
+            )
+          : Color.alphaBlend(
+              scheme.primary.withValues(alpha: 0.025),
+              Colors.white,
+            ),
       chartPalette: [
         scheme.primary,
         scheme.tertiary,
@@ -279,6 +288,50 @@ abstract final class AppTheme {
         titleTextStyle: base.textTheme.titleLarge?.copyWith(
           fontWeight: FontWeight.w800,
           color: scheme.onSurface,
+        ),
+      ),
+      cardTheme: base.cardTheme.copyWith(
+        color: dark ? scheme.surfaceContainerLow : Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radius + 4),
+          side: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: dark ? 0.35 : 0.55),
+          ),
+        ),
+      ),
+      // Pill tabs: the selected tab gets a soft brand background instead of
+      // an underline; no divider under the bar.
+      tabBarTheme: TabBarThemeData(
+        indicatorSize: TabBarIndicatorSize.tab,
+        indicator: BoxDecoration(
+          color: scheme.primaryContainer.withValues(alpha: dark ? 0.5 : 0.75),
+          borderRadius: BorderRadius.circular(radius + 2),
+        ),
+        dividerColor: Colors.transparent,
+        dividerHeight: 0,
+        labelColor: dark ? scheme.primary : scheme.onPrimaryContainer,
+        unselectedLabelColor: scheme.onSurfaceVariant,
+        labelStyle: base.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+        ),
+        unselectedLabelStyle: base.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w500,
+          fontSize: 14,
+        ),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+        splashBorderRadius: BorderRadius.circular(radius + 2),
+        overlayColor: WidgetStatePropertyAll(
+          scheme.primary.withValues(alpha: 0.05),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        thumbIcon: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? const Icon(Icons.check_rounded, size: 14)
+              : null,
         ),
       ),
       listTileTheme: base.listTileTheme.copyWith(

@@ -21,7 +21,10 @@ class BrandMark extends StatelessWidget {
             : LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [scheme.primary, scheme.tertiary],
+                colors: [
+                  Color.lerp(scheme.primary, Colors.white, 0.12)!,
+                  scheme.secondary,
+                ],
               ),
         color: onDark ? Colors.white.withValues(alpha: 0.18) : null,
         border: onDark
@@ -38,7 +41,7 @@ class BrandMark extends StatelessWidget {
               ],
       ),
       child: Icon(
-        Icons.bolt_rounded,
+        Icons.shopping_bag_rounded,
         color: onDark ? Colors.white : scheme.onPrimary,
         size: size * 0.6,
       ),

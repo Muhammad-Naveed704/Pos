@@ -41,7 +41,17 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
+    // The dashboard runs several queries; give the database time to answer.
+    for (
+      var i = 0;
+      i < 20 && find.text('Today’s sales').evaluate().isEmpty;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
     expect(find.text('Today’s sales'), findsOneWidget);
 
     appRouter.go('/pos');

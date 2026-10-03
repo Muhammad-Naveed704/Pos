@@ -35,7 +35,8 @@ enum ColorSource {
 
 /// Curated built-in schemes that look professional on a desktop POS.
 enum ThemePreset {
-  storeflow('StoreFlow Blue', FlexScheme.blue),
+  storeflow('StoreFlow Orange', FlexScheme.mango),
+  blue('Ocean Blue', FlexScheme.blue),
   indigo('Indigo Night', FlexScheme.indigo),
   emerald('Emerald Ledger', FlexScheme.jungle),
   money('Money Green', FlexScheme.money),
@@ -54,8 +55,32 @@ enum ThemePreset {
   final String label;
   final FlexScheme scheme;
 
-  Color get swatch => FlexColor.schemes[scheme]!.light.primary;
-  Color get swatchSecondary => FlexColor.schemes[scheme]!.light.secondary;
+  /// The brand preset uses hand-picked colours instead of a FlexScheme.
+  FlexSchemeColor? brandColors(bool dark) => this == storeflow
+      ? (dark
+            ? const FlexSchemeColor(
+                primary: Color(0xFFFF8A3D),
+                primaryContainer: Color(0xFF5C2A0C),
+                secondary: Color(0xFFFFB37A),
+                secondaryContainer: Color(0xFF4A2A14),
+                tertiary: Color(0xFF7CB4FF),
+                tertiaryContainer: Color(0xFF173A66),
+              )
+            : const FlexSchemeColor(
+                primary: Color(0xFFF26A1B),
+                primaryContainer: Color(0xFFFFE5D3),
+                secondary: Color(0xFFE0571A),
+                secondaryContainer: Color(0xFFFFEDE1),
+                tertiary: Color(0xFF2563EB),
+                tertiaryContainer: Color(0xFFDBE7FF),
+              ))
+      : null;
+
+  Color get swatch =>
+      brandColors(false)?.primary ?? FlexColor.schemes[scheme]!.light.primary;
+  Color get swatchSecondary =>
+      brandColors(false)?.tertiary ??
+      FlexColor.schemes[scheme]!.light.secondary;
 }
 
 /// Windows system fonts only, so the app stays fully offline.

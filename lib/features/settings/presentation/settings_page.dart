@@ -10,6 +10,7 @@ import '../../../core/ui/ui_kit.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/domain/permissions.dart';
 import '../../backup/presentation/backup_settings.dart';
+import '../../support/presentation/help_support.dart';
 import '../../pos/domain/pos_cart.dart';
 import '../data/business_settings_repository.dart';
 import '../domain/business_settings.dart';
@@ -30,7 +31,7 @@ class SettingsPage extends ConsumerWidget {
       Permissions.backupSettings,
     ].any(session.can);
     return DefaultTabController(
-      length: (canManage ? 5 : 1) + (canBackup ? 1 : 0),
+      length: (canManage ? 5 : 1) + (canBackup ? 1 : 0) + 1,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
         child: Column(
@@ -45,30 +46,31 @@ class SettingsPage extends ConsumerWidget {
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: [
-                const Tab(
-                  icon: Icon(Icons.palette_outlined),
-                  text: 'Appearance',
-                ),
+                const AppTab(icon: Icons.palette_outlined, text: 'Appearance'),
                 if (canManage) ...const [
-                  Tab(
-                    icon: Icon(Icons.public_rounded),
+                  AppTab(
+                    icon: Icons.public_rounded,
                     text: 'Business & regional',
                   ),
-                  Tab(
-                    icon: Icon(Icons.point_of_sale_rounded),
+                  AppTab(
+                    icon: Icons.point_of_sale_rounded,
                     text: 'Checkout & tax',
                   ),
-                  Tab(
-                    icon: Icon(Icons.receipt_long_rounded),
+                  AppTab(
+                    icon: Icons.receipt_long_rounded,
                     text: 'Receipt designer',
                   ),
-                  Tab(icon: Icon(Icons.security_rounded), text: 'Security'),
+                  AppTab(icon: Icons.security_rounded, text: 'Security'),
                 ],
                 if (canBackup)
-                  const Tab(
-                    icon: Icon(Icons.backup_rounded),
+                  const AppTab(
+                    icon: Icons.backup_rounded,
                     text: 'Data & backup',
                   ),
+                const AppTab(
+                  icon: Icons.support_agent_rounded,
+                  text: 'Help & support',
+                ),
               ],
             ),
             Expanded(
@@ -82,6 +84,7 @@ class SettingsPage extends ConsumerWidget {
                     SecuritySettings(),
                   ],
                   if (canBackup) const BackupSettingsTab(),
+                  const HelpSupportView(),
                 ],
               ),
             ),
@@ -940,6 +943,7 @@ class _BusinessFormState extends ConsumerState<_BusinessForm>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AppSegmented<TaxMode>(
+            expand: true,
             items: const [
               SegmentItem(
                 TaxMode.disabled,

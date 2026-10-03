@@ -89,11 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
+            // CompanyName + ProductName decide the data folder
+            // (%APPDATA%\com.storeflow\StoreFlow POS). Never change them.
             VALUE "CompanyName", "com.storeflow" "\0"
             VALUE "FileDescription", "StoreFlow POS" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "storeflow_pos" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.storeflow. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 XWS. All rights reserved." "\0"
             VALUE "OriginalFilename", "storeflow_pos.exe" "\0"
             VALUE "ProductName", "StoreFlow POS" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

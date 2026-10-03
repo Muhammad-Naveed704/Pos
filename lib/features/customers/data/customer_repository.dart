@@ -31,6 +31,40 @@ final customerBalancesProvider = StreamProvider<Map<String, double>>((ref) {
       );
 });
 
+class CustomerStats {
+  const CustomerStats(this.orders, this.total, this.lastPurchase);
+  final int orders;
+  final double total;
+  final DateTime? lastPurchase;
+}
+
+/// Orders, spend (non-voided sales) and last purchase per customer.
+final customerStatsProvider = StreamProvider<Map<String, CustomerStats>>((ref) {
+  final database = ref.watch(databaseProvider);
+  return database
+      .customSelect(
+        '''
+        SELECT customer_id, COUNT(*) AS orders, SUM(grand_total) AS total,
+               MAX(created_at) AS last_purchase
+        FROM sales
+        WHERE customer_id IS NOT NULL AND sale_status <> 'voided'
+        GROUP BY customer_id
+        ''',
+        readsFrom: {database.sales},
+      )
+      .watch()
+      .map(
+        (rows) => {
+          for (final row in rows)
+            row.read<String>('customer_id'): CustomerStats(
+              row.read<int>('orders'),
+              row.read<double>('total'),
+              row.readNullable<DateTime>('last_purchase'),
+            ),
+        },
+      );
+});
+
 class CustomerSummary {
   const CustomerSummary({
     required this.customer,

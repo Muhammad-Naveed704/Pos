@@ -8,6 +8,21 @@ import '../../auth/domain/app_session.dart';
 import '../../auth/domain/permission_guard.dart';
 import '../../auth/domain/permissions.dart';
 
+/// "Parent › Child" label for a category (two-level tree).
+String categoryPath(Category category, Iterable<Category> all) {
+  final parent = category.parentId == null
+      ? null
+      : all.where((c) => c.id == category.parentId).firstOrNull;
+  return parent == null ? category.name : '${parent.name} › ${category.name}';
+}
+
+class CategoryException implements Exception {
+  const CategoryException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 final categoryRepositoryProvider = Provider<CategoryRepository>(
   (ref) => CategoryRepository(ref.watch(databaseProvider)),
 );
@@ -48,25 +63,75 @@ class CategoryRepository {
       session,
       id == null ? Permissions.productsCreate : Permissions.productsEdit,
     );
-    if (parentId == id) {
-      throw ArgumentError('A category cannot be its own parent.');
+    final cleanName = name.trim();
+    final cleanCode = code.trim().toUpperCase();
+    if (cleanName.isEmpty) {
+      throw const CategoryException('Enter a category name.');
+    }
+    if (cleanCode.isEmpty) {
+      throw const CategoryException('Enter a short code.');
+    }
+    if (id != null && parentId == id) {
+      throw const CategoryException('A category cannot be its own parent.');
     }
     final categoryId = id ?? _uuid.v4();
     final now = DateTime.now();
-    await _database
-        .into(_database.categories)
-        .insertOnConflictUpdate(
-          CategoriesCompanion.insert(
-            id: categoryId,
-            name: name.trim(),
-            code: code.trim().toUpperCase(),
-            parentId: Value(parentId),
-            isActive: Value(isActive),
-            sortOrder: Value(sortOrder),
-            createdAt: now,
-            updatedAt: now,
-          ),
+    await _database.transaction(() async {
+      final all = await _database.select(_database.categories).get();
+      final current = all.where((c) => c.id == id).firstOrNull;
+      // Two levels: categories, and sub-categories inside them.
+      if (parentId != null) {
+        final parent = all.where((c) => c.id == parentId).firstOrNull;
+        if (parent == null) {
+          throw const CategoryException(
+            'The chosen category no longer exists.',
+          );
+        }
+        if (parent.parentId != null) {
+          throw const CategoryException(
+            'Choose a main category; sub-categories cannot have their own '
+            'sub-categories.',
+          );
+        }
+        if (id != null && all.any((c) => c.parentId == id)) {
+          throw const CategoryException(
+            'This category has sub-categories, so it must stay a main category.',
+          );
+        }
+      }
+      final sameName = all.where(
+        (c) =>
+            c.id != id &&
+            c.parentId == parentId &&
+            c.name.toLowerCase() == cleanName.toLowerCase(),
+      );
+      if (sameName.isNotEmpty) {
+        throw CategoryException(
+          parentId == null
+              ? 'A category named "$cleanName" already exists.'
+              : 'This category already has a sub-category named "$cleanName".',
         );
+      }
+      if (all.any((c) => c.id != id && c.code.toUpperCase() == cleanCode)) {
+        throw CategoryException(
+          'The code $cleanCode is already used by another category.',
+        );
+      }
+      await _database
+          .into(_database.categories)
+          .insertOnConflictUpdate(
+            CategoriesCompanion.insert(
+              id: categoryId,
+              name: cleanName,
+              code: cleanCode,
+              parentId: Value(parentId),
+              isActive: Value(isActive),
+              sortOrder: Value(sortOrder),
+              createdAt: current?.createdAt ?? now,
+              updatedAt: now,
+            ),
+          );
+    });
     return categoryId;
   }
 

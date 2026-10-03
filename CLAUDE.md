@@ -97,6 +97,37 @@ calendar popover) and `SearchField`. Do not add new `DropdownButtonFormField`
 or `SegmentedButton` call sites: the former only reads its initial value,
 which caused stale selections after reloads.
 
+Brand UI: the default preset `storeflow` is "StoreFlow Orange" (hand-picked
+colours in `ThemePreset.brandColors`, light surfaces kept near white). The
+shell has a global product search (`/products?q=`), an "Offline ready" chip,
+store switcher, notifications (low/out of stock, overdue credit) and a user
+chip; the active store card sits at the bottom of the sidebar. Lists use
+`AppTable` (header row, hover, footer) and `NameAvatar`; products show
+`ProductThumb`. Product images are chosen in the product editor and copied,
+scaled to 800 px, into `<app support>/StoreFlow POS/images` by
+`ProductImages` (off the UI isolate). Use `Switch`/`SwitchListTile`, never
+checkboxes, and `AppTab` (icon beside label) in tab bars. The dashboard
+reads `dashboardInsightsProvider(DashPeriod)`; `dashboardMetricsProvider`
+stays for compatibility/tests.
+
+Release/store: version 1.0.0 (pubspec, `msix_config.msix_version`,
+`AppInfo.appVersion`). `dart run msix:create` builds the Microsoft Store
+package (capabilities: webcam + runFullTrust only). Partner Center identity
+values must replace the placeholders in `msix_config`; see
+`docs/store/MICROSOFT_STORE_RELEASE.md` (plus privacy policy, listing,
+support, terms) and `docs/USER_GUIDE.md`. App icon:
+`dart run tool/generate_icons.dart` writes `assets/branding/storeflow_icon.png`
+and `windows/runner/resources/app_icon.ico`. Never change `CompanyName` /
+`ProductName` in `Runner.rc`: path_provider derives the data folder from
+them. Support contact lives in `SupportContact` (Settings → Help & support
+and the user menu). Categories are two levels: main categories and sub-categories
+(`CategoryRepository.save` enforces it and refuses duplicate names per
+parent and duplicate codes with `CategoryException`). The page lists main
+categories on the left and the selected one's sub-categories on the right;
+`categoryPath` gives "Main › Sub" labels (product editor). Do not put a
+ListTile/SwitchListTile inside a coloured Container; use Material. `AppSegmented` keeps its natural width
+unless `expand: true` (a stretched non-expanded control misplaced its thumb).
+
 Theme rule: any `ButtonStyle.textStyle`, chip `labelStyle` or similar must be
 derived from `textTheme` (e.g. `textTheme.labelLarge?.copyWith(...)`). A bare
 `TextStyle(fontWeight: ...)` replaces the whole style, drops the font family,

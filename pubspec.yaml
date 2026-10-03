@@ -1,7 +1,7 @@
 name: storeflow_pos
 description: Offline-first Windows point of sale for modern businesses.
 publish_to: "none"
-version: 0.1.0+1
+version: 1.0.0+1
 
 environment:
   sdk: ^3.13.2
@@ -45,6 +45,29 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
+  msix: ^3.18.0
 
 flutter:
   uses-material-design: true
+
+# Microsoft Store package (dart run msix:create). Replace the three values
+# marked PARTNER CENTER with the ones shown in Partner Center → your app →
+# Product management → Product identity before building the store package.
+# See docs/store/MICROSOFT_STORE_RELEASE.md.
+msix_config:
+  display_name: StoreFlow POS
+  publisher_display_name: XWS # PARTNER CENTER: Publisher display name
+  identity_name: XWS.StoreFlowPOS # PARTNER CENTER: Package/Identity/Name
+  publisher: CN=XWS # PARTNER CENTER: Package/Identity/Publisher
+  msix_version: 1.0.0.0
+  description: Offline point of sale for shops and stores on Windows.
+  logo_path: assets/branding/storeflow_icon.png
+  start_menu_icon_path: assets/branding/storeflow_icon.png
+  tile_icon_path: assets/branding/storeflow_icon.png
+  icons_background_color: transparent
+  languages: en-us
+  architecture: x64
+  # webcam: camera barcode scanning. Printing, file pickers, backups and the
+  # local database need no extra capability for a desktop (full trust) app.
+  capabilities: webcam
+  store: true

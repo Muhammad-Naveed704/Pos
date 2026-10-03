@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,7 @@ import 'package:storeflow_pos/core/money/money.dart';
 import 'package:storeflow_pos/core/theme/theme_controller.dart';
 import 'package:storeflow_pos/features/auth/application/session_controller.dart';
 import 'package:storeflow_pos/features/backup/data/backup_service.dart';
+import 'package:storeflow_pos/features/categories/data/category_repository.dart';
 import 'package:storeflow_pos/features/backup/presentation/backup_settings.dart';
 import 'package:storeflow_pos/features/credit/data/credit_service.dart';
 import 'package:storeflow_pos/features/customers/data/customer_repository.dart';
@@ -40,6 +42,39 @@ Future<void> _font(String family, List<String> files) async {
     loader.addFont(Future.value(ByteData.view(bytes.buffer)));
   }
   await loader.load();
+}
+
+/// Simple generated product "photos" so thumbnails appear in screenshots.
+String _sampleImage(int seed) {
+  const colors = [
+    (0xF2, 0x6A, 0x1B),
+    (0x25, 0x63, 0xEB),
+    (0x16, 0xA3, 0x4A),
+    (0x93, 0x33, 0xEA),
+    (0xDB, 0x27, 0x77),
+  ];
+  final (r, g, b) = colors[seed % colors.length];
+  final image = img.Image(width: 240, height: 240);
+  img.fill(image, color: img.ColorRgb8(250, 248, 246));
+  img.fillCircle(
+    image,
+    x: 120,
+    y: 130,
+    radius: 80,
+    color: img.ColorRgb8(r, g, b),
+  );
+  img.fillRect(
+    image,
+    x1: 90,
+    y1: 30,
+    x2: 150,
+    y2: 70,
+    color: img.ColorRgb8(r ~/ 2, g ~/ 2, b ~/ 2),
+  );
+  final file = File(
+    '${Directory.systemTemp.path}${Platform.pathSeparator}storeflow-shot-$seed.png',
+  )..writeAsBytesSync(img.encodePng(image));
+  return file.path;
 }
 
 void main() {
@@ -89,6 +124,7 @@ void main() {
             salePrice: 120.0 + i * 85,
             costPrice: 90.0 + i * 60,
             stockQty: i == 3 ? 2 : 20.0 + i,
+            imagePath: i.isEven ? _sampleImage(i) : null,
             reorderLevel: 5,
             defaultDiscount: i == 1 ? 10 : 0,
           ),
@@ -110,6 +146,21 @@ void main() {
         }
       }
       // A customer with credit sales, one overdue, and a payment.
+      final categories = CategoryRepository(fixture.database);
+      final grocery = await categories.save(
+        session: owner,
+        name: 'Grocery',
+        code: 'GROC',
+      );
+      for (final (name, code) in const [('Rice', 'RICE'), ('Oil', 'OIL')]) {
+        await categories.save(
+          session: owner,
+          name: name,
+          code: code,
+          parentId: grocery,
+        );
+      }
+      await categories.save(session: owner, name: 'Pharmacy', code: 'PHAR');
       customerId = await CustomerRepository(fixture.database).save(
         session: owner,
         name: 'Bilal Traders',
@@ -205,6 +256,9 @@ void main() {
       '/purchases',
       '/cashbook',
       '/users',
+      '/customers',
+      '/categories',
+      '/stores',
     ]) {
       appRouter.go(route);
       await shot(route.substring(1));
@@ -214,7 +268,7 @@ void main() {
     appRouter.go('/pos');
     await settle();
     await tester.tap(find.text('Premium Tea 500g').first);
-    await tester.tap(find.text('Sugar 1kg').first);
+    await tester.tap(find.text('Basmati Rice 5kg').first);
     await shot('pos-cart');
 
     // Product editor dialog.
@@ -231,6 +285,21 @@ void main() {
     await tester.tap(find.text('Today').first);
     await shot('date-range');
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle();
+
+    // Settings tabs and parent categories.
+    appRouter.go('/settings');
+    await settle();
+    await tester.tap(find.text('Checkout & tax'));
+    await shot('settings-checkout');
+    await tester.tap(find.text('Receipt designer'));
+    await shot('settings-receipt');
+    appRouter.go('/categories');
+    await settle();
+    await shot('categories-parents');
+    await tester.tap(find.text('New sub-category'));
+    await shot('category-editor');
+    await tester.tap(find.text('Cancel').last);
     await settle();
 
     // Customer account screens.
